@@ -1,0 +1,278 @@
+---
+title: "Demographics"
+author: "Dani Cosme"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    theme: united
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+options(scipen = 999)
+```
+
+# load packages
+```{r}
+library(tidyverse)
+library(knitr)
+library(lubridate)
+```
+
+# define functions
+```{r}
+summary_table = function(data, variable, race_summarized = TRUE) {
+  
+  if (variable == "race" & race_summarized == TRUE) {
+    summmarized = data %>%
+      filter(measure == !!variable) %>%
+      mutate(value = ifelse(is.na(value) | value == "", "Not reported", value),
+             value = ifelse(grepl(",", value), "More than one race or ethnicity", value)) %>%
+      group_by(value) %>%
+      summarize(n = n()) %>%
+      mutate(percent = round((n / sum(n)) * 100, 1))
+    
+  } else if (variable == "collegeYear") {
+    summmarized = data %>%
+      filter(measure == !!variable) %>%
+      mutate(value = ifelse(is.na(value) | value == "", "Not reported", value)) %>%
+      group_by(value) %>%
+      summarize(n = n()) %>%
+      mutate(percent = round((n / sum(n)) * 100, 1),
+             value = factor(value, levels = c("Freshman", "Sophomore", "Junior", "Senior",
+                                              "Other", "I am not currently a college student.",
+                                              "Not reported"))) %>%
+      arrange(value)
+    
+  } else if (grepl("educ", variable)) {
+    summmarized = data %>%
+      filter(measure == !!variable) %>%
+      mutate(value = ifelse(is.na(value) | value == "", "Not reported", value)) %>%
+      group_by(value) %>%
+      summarize(n = n()) %>%
+      mutate(percent = round((n / sum(n)) * 100, 1),
+             value = factor(value, levels = c("Some high school", "High school or GED",
+                                              "Associate's or professional degree",
+                                              "Some college",
+                                              "Bachelor's degree",
+                                              "Master's degree",
+                                              "Ph.D or equivalent (M.D., J.D., etc.)",
+                                              "Not reported"))) %>%
+      arrange(value)
+    
+  } else if (variable == "income") {
+    summmarized = data %>%
+      filter(measure == !!variable) %>%
+      mutate(value = ifelse(is.na(value) | value == "", "Not reported", value)) %>%
+      group_by(value) %>%
+      summarize(n = n()) %>%
+      mutate(percent = round((n / sum(n)) * 100, 1),
+             value = factor(value, levels = c("$0 to $9,999",
+                                              "$10,000 to $14,999",
+                                              "$15,000 to $19,999",
+                                              "$20,000 to $34,999",
+                                              "$35,000 to $49,999",
+                                              "$50,000 to $74,999",
+                                              "$75,000 to $99,999",
+                                              "$100,000 to $199,999",
+                                              "$200,000 or more",
+                                              "Not reported"))) %>%
+      arrange(value)
+    
+  } else if (variable == "age") {
+    summmarized = data %>%
+      filter(measure == !!variable) %>%
+      filter(!is.na(value)) %>%
+      mutate(value = as.numeric(value)) %>%
+      summarize(n = n(),
+                M = mean(value, na.rm = TRUE),
+                SD = sd(value, na.rm = TRUE))
+  
+  } else {
+    summmarized = data %>%
+      filter(measure == !!variable) %>%
+      mutate(value = ifelse(is.na(value) | value == "", "Not reported", value)) %>%
+      group_by(value) %>%
+      summarize(n = n()) %>%
+      mutate(percent = round((n / sum(n)) * 100, 1))
+  }
+  
+  summmarized  %>%
+    kable(digits = 2, format = "pandoc")
+}
+```
+
+# load and tidy data {.tabset}
+## demographics
+```{r}
+duplicate_ids = read.csv("../data/demographics/MURI_Master_Participants - Overview.csv", stringsAsFactors = FALSE) %>%
+  filter(duplicate > 0) %>%
+  select(pID, duplicate, duplicate_id) %>%
+  group_by(duplicate) %>%
+  mutate(newID = sprintf("%s_%s", pID, duplicate_id), pID,
+         filter_out = row_number(),
+         newID = ifelse(filter_out == 2, newID[1], newID)) %>%
+  ungroup() %>%
+  select(pID, newID)
+  
+completion_data = read.csv("../data/demographics/cleaned_completion_data.csv") %>%
+  spread(key, value)
+
+demo_all = read.csv("../data/demographics/master_demo.csv") %>%
+  mutate(StartDate = gsub(" .*", "", StartDate),
+         StartDate = gsub("/21$", "/2021", StartDate),
+         StartDate = gsub("/20$", "/2020", StartDate),
+         StartDate = gsub("/19$", "/2019", StartDate),
+         date = parse_date_time(StartDate, c("dmy", "ymd", "%m/%d/%Y"))) %>%
+  select(pID, date, contains("collegeYear"), contains("age"), contains("gender"), contains("race"), contains("educ"), contains("income")) %>%
+  gather(key, value, -pID, -date) %>%
+  mutate(key = gsub("baseline_short", "_baselineshort", key)) %>%
+  extract(key, c("measure", "survey"), "(.*)_(.*)") %>%
+  spread(survey, value) %>%
+  mutate(value = ifelse(is.na(baseline), baselineshort, baseline),
+         value = ifelse(is.na(value), followup1, value),
+         value = ifelse(is.na(value), followup2, value)) %>%
+  select(pID, date, measure, value) %>%
+  spread(measure, value) %>%
+  left_join(., duplicate_ids) %>%
+  mutate(pID = ifelse(is.na(newID), pID, newID)) %>%
+  full_join(., completion_data)
+
+demo_all$duplicated = duplicated(demo_all$pID) | duplicated(demo_all$pID, fromLast=TRUE)
+
+demo_duplicates = demo_all %>%
+  filter(duplicated == TRUE) %>%
+  arrange(pID, date) %>%
+  group_by(pID) %>%
+  mutate(filter_out = row_number()) %>%
+  filter(filter_out == 1) %>%
+  select(-filter_out, -duplicated)
+  
+demo_noduplicates = demo_all %>%
+  filter(duplicated == FALSE) %>%
+  bind_rows(., demo_duplicates) %>%
+  select(-newID) %>%
+  gather(key, value, baseline, contains("covid"), contains("ema"), contains("followup"), contains("scan")) %>%
+  filter(!grepl("^not", value)) %>%
+  mutate(pID = gsub("muric", "sub-MURIC", pID),
+         pID = gsub("muri", "sub-MURIP", pID)) %>%
+  filter(key == "baseline")
+```
+
+## task
+```{r}
+task = read.csv("../data/task/cuereact_all062920.csv", stringsAsFactors = FALSE) %>%
+  filter(grepl("rating", trial_type)) %>%
+  select(pID, block_num, trial_num, trial_type, resp, rt, stim) %>%
+  mutate(trial_cond = ifelse(grepl("friend3|friend4", trial_type), "regulation",
+                      ifelse(grepl("friend1|friend2", trial_type), "up-regulation",
+                      ifelse(grepl("mindful", trial_type), "regulation",
+                      ifelse(grepl("nonalc", trial_type), "non-alcohol reactivity",
+                      ifelse(grepl("rating_alc_react", trial_type), "reactivity", NA))))),
+         trial_cond = factor(trial_cond, levels = c("non-alcohol reactivity", "reactivity", "regulation", "up-regulation"))) %>%
+  rename("stimulus" = stim) %>%
+  filter(!is.na(stimulus)) %>%
+  select(pID, trial_type) %>%
+  unique() %>%
+  filter(grepl("friend|mindful", trial_type) | pID %in% c("sub-MURIP012", "sub-MURIP063", "sub-MURIP078")) %>%
+  mutate(condition = ifelse(grepl("friend", trial_type), "perspective", "mindful"),
+         site = ifelse(grepl("C", pID), "Columbia", "Penn")) %>%
+  select(-trial_type) %>%
+  unique() %>%
+  filter(condition == "mindful") %>%
+  left_join(., demo_noduplicates)
+```
+
+## EMA
+```{r}
+ema = read.csv("../data/ema/cleaned_EMA.csv", stringsAsFactors = FALSE) %>%
+  select(pID, Condition) %>%
+  unique() %>%
+  mutate(pID = gsub("muric", "sub-MURIC", pID),
+         pID = gsub("muri", "sub-MURIP", pID),
+         site = ifelse(grepl("C", pID), "Columbia", "Penn")) %>%
+  rename("condition" = Condition) %>%
+  filter(condition == "mindful") %>%
+  left_join(., demo_noduplicates)
+```
+
+
+# sample Ns {.tabset}
+## fMRI task
+```{r}
+task %>%
+  group_by(site) %>%
+  summarize(n = n()) %>%
+  kable(format = "pandoc")
+```
+
+## EMA
+```{r}
+ema %>%
+  group_by(site) %>%
+  summarize(n = n()) %>%
+  kable(format = "pandoc")
+```
+
+# demographics {.tabset}
+```{r}
+demo_summary = task %>%
+  select(-key, -value, -duplicated, -condition) %>%
+  gather(measure, value, -pID, -date, -gID, -site) %>%
+  unique()
+```
+
+### age
+```{r}
+summary_table(demo_summary, "age")
+```
+
+### college year
+```{r}
+summary_table(demo_summary, "collegeYear")
+```
+
+### gender
+```{r}
+summary_table(demo_summary, "gender")
+```
+
+### race and ethnicity {.tabset}
+#### summarized
+```{r}
+summary_table(demo_summary, "race")
+```
+
+#### not summarized
+```{r}
+summary_table(demo_summary, "race", race_summarized = FALSE)
+```
+
+### education {.tabset}
+#### self
+```{r}
+summary_table(demo_summary, "educ_self")
+```
+
+#### mother
+```{r}
+summary_table(demo_summary, "educ_mother")
+```
+
+#### father
+```{r}
+summary_table(demo_summary, "educ_father")
+```
+
+### income {.tabset}
+```{r}
+summary_table(demo_summary, "income")
+```
+
