@@ -1,5 +1,5 @@
 ---
-title: "Task craving MLM analyses"
+title: "fMRI task analyses"
 author: "Dani Cosme"
 date: "`r Sys.Date()`"
 output:
@@ -20,6 +20,10 @@ output:
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.path = "figs/", dpi = 300, colormodel = "cmyk", cache = FALSE)
 options(scipen = 999)
 ```
+
+This code reproduces the fMRI analyses reported in the following manuscript:
+
+[Cosme, D., Helion, C., et al. (2023) Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
 
 # load packages
 ```{r}
@@ -53,10 +57,12 @@ make_table = function(data) {
       mutate(term = gsub("\\(Intercept\\)", "intercept", term),
              term = gsub("trial_condregulation", "task condition (mindful attention)", term),
              term = gsub("trial_cond_recode", "task condition (mindful attention)", term),
+             term = gsub("trial_condmindfulattention", "task condition (mindful attention)", term),
              term = gsub("dot_between_std_noc", "signature expression (between)", term),
              term = gsub("dot_within_std", "signature expression (within)", term),
              term = gsub("dot_sd", "signature expression variability", term),
              term = gsub("regulation_expression", "signature expression", term),
+             term = gsub("confidence_rating", "confidence rating", term),
              term = gsub(":", " x  ", term),
              `b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high),) %>%
       select(term, `b [95% CI]`) %>%
@@ -64,181 +70,35 @@ make_table = function(data) {
 }
 ```
 
-# load and tidy data {.tabset}
-* remove trials missing stimulus information
-  * the following participants had technical errors during all mindful attention trials: sub-MURIP012, sub-MURIP063, sub-MURIP078
-* remove trials in which the mean signal intensity of the brain map is +/- 3 SDs from the mean
-
-## task
+# load data
 ```{r}
-task_data = read.csv("../data/task/cuereact_all062920.csv", stringsAsFactors = FALSE) %>%
-  filter(grepl("rating", trial_type)) %>%
-  select(pID, block_num, trial_num, trial_type, resp, rt, stim) %>%
-  mutate(trial_cond = ifelse(grepl("friend3|friend4", trial_type), "regulation",
-                      ifelse(grepl("friend1|friend2", trial_type), "up-regulation",
-                      ifelse(grepl("mindful", trial_type), "regulation",
-                      ifelse(grepl("nonalc", trial_type), "non-alcohol reactivity",
-                      ifelse(grepl("rating_alc_react", trial_type), "reactivity", NA))))),
-         trial_cond = factor(trial_cond, levels = c("non-alcohol reactivity", "reactivity", "regulation", "up-regulation"))) %>%
-  rename("stimulus" = stim) %>%
-  filter(!is.na(stimulus))
-
-task_conditions = task_data %>%
-  select(pID, trial_type) %>%
-  unique() %>%
-  filter(grepl("friend|mindful", trial_type) | pID %in% c("sub-MURIP012", "sub-MURIP063", "sub-MURIP078")) %>%
-  mutate(condition = ifelse(grepl("friend", trial_type), "perspective-taking", "mindful attention")) %>%
-  select(-trial_type) %>%
-  unique()
-
-task_data_all = task_data %>%
-  left_join(., task_conditions) %>%
-  mutate(condition = ifelse(is.na(condition), "control", condition),
-         trial_cond = factor(trial_cond, c("non-alcohol reactivity", "reactivity", "regulation", "up-regulation")))
-
-task_mindful = task_data_all %>%
-  filter(condition == "mindful attention")
-```
-
-## dots
-```{r}
-file_dir = "../data/dots"
-file_pattern = "sub.*"
-file_list = list.files(file_dir, pattern = file_pattern)
-
-dots_tmp = data.frame()
-
-for (file in file_list) {
-  tmp = tryCatch(read.table(file.path(file_dir,file), fill = TRUE, header = TRUE, sep = ",") %>%
-                    extract(file, c("pID", "beta"), ".*(sub-MURIC[0-9]{3}|sub-MURIP[0-9]{3})/(beta_[0-9]{4}).nii") %>%
-                    mutate(stimulus = as.character(stimulus)), error = function(e) message(file))
-  
-  dots_tmp = rbind(dots_tmp, tmp)
-  rm(tmp)
-}
-
-dots = dots_tmp %>%
-  left_join(., task_conditions) %>%
-  mutate(condition = ifelse(is.na(condition), "control", condition)) %>%                                              
-  group_by(pID) %>%
-  filter(!stimulus == "nan") %>%
-  mutate(sd3_signal = 3 * sd(mean_signal, na.rm = TRUE),
-         grand_mean_signal = mean(mean_signal, na.rm = TRUE),
-         outlier = ifelse(mean_signal > grand_mean_signal + sd3_signal, 1,
-                   ifelse(mean_signal < grand_mean_signal - sd3_signal, 1, 0))) %>%
-  select(-sd3_signal, -grand_mean_signal) %>%
-  filter(!outlier == 1)
-```
-
-## classifier data
-```{r}
-classifier_data = read.csv("../data/mvpa/logistic_stats.csv", stringsAsFactors = FALSE) %>%
-  rename("pID" = subjectID) %>%
-    mutate(predicted_factor = ifelse(predicted > .5, "regulate", "react"),
-           predicted_factor = as.factor(predicted_factor),
-           actual_factor = ifelse(actual == 1, "regulate", "react"),
-           actual_factor = as.factor(actual_factor))
-```
-
-# merge and prep for modeling
-* filter out motion exclusions: sub-MURIC303
-* filter out reactivity to non-alcoholic beverage trials
-* recode trial condition as regulation = -.5 and reactivity = .5 to test relationship collapsed across conditions
-* create disaggregated_mindful dataset
-  * `dot_within_std` = within-person centered level-1 signature expression variable; standardized across participants
-  * `dot_between_std` = grand-mean centered level-2 signature expression variable; standardized across participants
-* due to a technical errror, the following participants are missing behavioral data from mindful attention trials: sub-MURIP063, sub-MURIP078, sub-MURIP012
-
-```{r}
-merged = task_data_all %>%
-  full_join(., dots) %>%
-  filter(!pID == "sub-MURIC303") %>%
-  filter(trial_cond %in% c("reactivity", "regulation")) %>%
-  mutate(trial_cond_recode = ifelse(trial_cond == "regulation", .5, -.5),
-         trial_cond = as.factor(as.character(trial_cond)))
-
-between = merged %>%
-  select(pID, dot, trial_cond, trial_cond_recode, condition) %>%
-  group_by(pID, trial_cond, trial_cond_recode, condition) %>%
-  summarize(dot_between = mean(dot, na.rm = TRUE)) %>%
-  group_by(condition) %>%
-  mutate(sd_dot = sd(dot_between, na.rm = TRUE),
-         dot_between_std_noc = dot_between / sd_dot) %>%
-  select(-sd_dot)
-
-within = merged %>%
-  select(pID, block_num, trial_num, dot, condition, trial_cond) %>%
-  group_by(pID, condition) %>%
-  mutate(dot_within_c = scale(dot, scale = FALSE, center = TRUE)) %>%
-  group_by(condition) %>%
-  mutate(sd_dot = sd(dot_within_c, na.rm = TRUE),
-         dot_within_std = dot_within_c / sd_dot) %>%
-  mutate(classifier_accuracy = ifelse(dot > 0 & trial_cond == "regulation", "hit",
-                               ifelse(dot < 0 & trial_cond == "reactivity", "correct rejection",
-                               ifelse(dot > 0 & trial_cond == "reactivity", "false alarm",
-                               ifelse(dot < 0 & trial_cond == "regulation", "miss", NA))))) %>%
-  select(-sd_dot)
-
-
-disaggregated = merged %>%
-  left_join(., between, by = c("pID", "condition", "trial_cond", "trial_cond_recode")) %>%
-  left_join(., within, by = c("pID", "condition", "trial_num", "block_num", "trial_cond", "dot")) %>%
-  filter(trial_cond %in% c("reactivity", "regulation"))
-
+classifier_data = read.csv("../data/classifier_data.csv", stringsAsFactors = FALSE) %>%
+  mutate(predicted_factor = as.factor(predicted_factor),
+         actual_factor = as.factor(actual_factor))
+ratings = read.csv("../data/ratings.csv", stringsAsFactors = FALSE)
+merged = read.csv("../data/task_neuro_data.csv", stringsAsFactors = FALSE)
+disaggregated = read.csv("../data/disaggregated_data.csv", stringsAsFactors = FALSE)
 disaggregated_mindful = disaggregated %>%
   filter(condition == "mindful attention")
-
-disaggregated_control = disaggregated %>%
-  filter(condition == "control")
 ```
 
-# preregistered hypotheses
-## mindful attention signature development analyses
+# mindful attention signature development analyses {.tabset}
 
 Here is the weight map from the MVPA analyses:
 
 ![](weight_map.png)
 
 
-### H1a {.tabset}
-> We expect that we will be able to train a classifier at the run level to distinguish mindful attention from uninstructed reactivity to alcohol cues with greater than chance accuracy decoding.
+## cross-validation accuracy {.tabset}
 
-**Results**
-
-`r emo::ji("check")` Average cross-validation decoding accuracy is greater than chance (though there's lot of room for improvement).
-
-#### ROC 
-```{r, fig.width=5, fig.height=4.5}
-classifier_data %>%
-  do({
-    condition = .$condition
-    pred = prediction(.$predicted, .$actual)
-    perf = performance(pred, measure = "tpr", x.measure = "fpr")
-    data.frame(cut = perf@alpha.values[[1]],fpr = perf@x.values[[1]],tpr = perf@y.values[[1]])
-  }) %>%
-  ggplot(aes(fpr, tpr)) +
-    geom_line(color = palette[4], size = 1) +
-    geom_abline(intercept = 0, slope = 1) +
-    scale_x_continuous(breaks = seq(0, 1, .2)) +
-    scale_y_continuous(breaks = seq(0, 1, .2)) +
-    labs(x = "\nfalse positive rate (1 - specificity)", y = "true positive rate (sensitivity)\n") +
-    theme(legend.position = c(.8, .3),
-          legend.spacing.y = unit(-.1, "cm")) +
-   plot_aes
-```
-
-#### confusion matrix
+`r emo::ji("check")` We expect that we will be able to train a classifier at the run level to distinguish mindful attention from uninstructed reactivity to alcohol cues with greater than chance accuracy decoding.
 
 ```{r}
 caret::confusionMatrix(classifier_data$predicted_factor, classifier_data$actual_factor)
 ```
 
-## H1b {.tabset}
-> Given that the classifier is developed at the run level, we will also confirm that the expression of the mindful attention signature is evident at the trial-level. That is, we expect the signature expression to be higher during mindful attention trials compared to reactivity trials.
-
-**Results**
-
-`r emo::ji("check")` Signature expression was higher on average during mindful attention trials than reactivity trials. Applying the signature as a classifier on a trial level, we also observed relatively high accuracy (70%) that is significantly above chance.
+## trial-level accuracy {.tabset}
+`r emo::ji("check")` Given that the classifier is developed at the run level, we will also confirm that the expression of the mindful attention signature is evident at the trial-level. That is, we expect the signature expression to be higher during mindful attention trials compared to reactivity trials.
 
 ### means {.tabset}
 #### plot
@@ -275,7 +135,7 @@ make_table(mod_means)
 summary(mod_means)
 ```
 
-### ROC 
+### ROC plot
 ```{r, fig.width=5, fig.height=4.5}
 acc_line1 = data.frame(x = c(0, 1), y = c(1, 1))
 acc_line2 = data.frame(y = c(0, 1), x = c(0, 0))
@@ -305,7 +165,7 @@ merged %>%
           legend.spacing.y = unit(-.1, "cm"))
 ```
 
-#### confusion matrix
+### confusion matrix
 ```{r}
 conf_data = merged %>%
   filter(condition == "mindful attention") %>%
@@ -318,7 +178,11 @@ conf_data = merged %>%
 caret::confusionMatrix(conf_data$predicted, conf_data$trial_cond)
 ```
 
-## craving: behavior only {.tabset}
+# efficacy: trial-level craving analyses {.tabset}
+## H1 {.tabset}
+
+`r emo::ji("check")` Compared to reactivity trials, mindful attention trials will be associated with decreased craving 
+
 ### run model
 ```{r, cache=FALSE, include = FALSE}
 mod_behavior = brms::brm(resp ~ 1 + trial_cond +
@@ -352,94 +216,22 @@ make_table(mod_behavior)
 summary(mod_behavior)
 ```
 
-## craving: mindful attention signature analyses
-### H2 & H3 {.tabset}
-##### H2:
+## H2 {.tabset}
 
-> We expect that people who have greater expression of the mindful attention signature on average (i.e., L2, between-person expression) will also have lower craving ratings on a trial-by-trial basis.
+`r emo::ji("check")` A: We expect that people who have greater expression of the mindful attention signature on average (i.e., L2, between-person expression) will also have lower craving ratings on a trial-by-trial basis.
 
-**Results**
+`r emo::ji("x")` B: We expect that trials with greater expression of the mindful attention signature compared to one’s average (i.e., L1, within-person expression) will be associated with lower craving ratings on a trial-by-trial basis.
 
-`r emo::ji("check")` There is a statistically significant interaction between trial type and signature expression, such that people who have higher signature expression on average during mindful attention trials also report lower craving ratings, compared to during reactivity trials.
-
-<br>
-
-##### H3:
-
-> H3: We expect that trials with greater expression of the mindful attention signature compared to one’s average (i.e., L1, within-person expression) will be associated with lower craving ratings on a trial-by-trial basis.
-
-**Results**
-
-`r emo::ji("x")` Directionally, greater signature expression compared to one's mean is associated with lower craving ratings on mindful attention trials, but this relationship is small and not statistically significant.
-
-#### visualize raw data {.tabset}
-##### averaged within participant
-```{r}
-merged %>%
-  filter(condition == "mindful attention") %>%
-  group_by(pID, trial_cond) %>%
-  mutate(mean_craving = mean(resp, na.rm = TRUE),
-         mean_expression = mean(dot, na.rm = TRUE)) %>%
-  select(pID, trial_cond, mean_expression, mean_craving) %>%
-  unique() %>%
-  ggplot(aes(mean_expression, mean_craving, color = trial_cond, fill = trial_cond)) +
-  geom_jitter(alpha = .5, height = .1) +
-  geom_smooth(method = "lm") +
-  scale_color_manual(name = "trial type", values = palette) +
-  scale_fill_manual(name = "trial type", values = palette) +
-  labs(x = expression("\nreactivity   " * symbol('\254') * "   mean signature expression   " * symbol('\256') * "   mindful attention"),
-       y = "mean craving rating\n") +
-  plot_aes +
-  theme(legend.position = "top")
-```
-
-##### all data
-```{r}
-merged %>%
-  filter(condition == "mindful attention") %>%
-  group_by(pID, trial_cond) %>%
-  select(pID, trial_cond, dot, resp) %>%
-  unique() %>%
-  ggplot(aes(dot, resp, color = trial_cond, fill = trial_cond)) +
-  geom_jitter(alpha = .5, height = .1) +
-  geom_smooth(method = "lm") +
-  scale_color_manual(name = "trial type", values = palette) +
-  scale_fill_manual(name = "trial type", values = palette) +
-  labs(x = expression("\nreactivity   " * symbol('\254') * "   mean signature expression   " * symbol('\256') * "   mindful attention"),
-       y = "mean craving rating\n") +
-  plot_aes +
-  theme(legend.position = "top")
-```
-
-##### participant slopes
-```{r}
-disaggregated_mindful %>%
-  ggplot(aes(dot, resp, color = trial_cond, fill = trial_cond)) +
-  geom_smooth(aes(group = interaction(pID, trial_cond)), method = "lm", se = FALSE, size = .2) +
-  geom_smooth(method = "lm") +
-  scale_color_manual(name = "trial type", values = palette) +
-  scale_fill_manual(name = "trial type", values = palette) +
-  labs(x = expression("\nreactivity   " * symbol('\254') * "   signature expression   " * symbol('\256') * "   mindful attention"),
-       y = "craving rating\n") +
-  plot_aes +
-  theme(legend.position = "top")
-```
-
-#### run model {.tabset}
+### run model {.tabset}
 ```{r, cache = TRUE, include = FALSE}
 mod_h2_int = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
                          trial_cond * dot_within_std +
                          (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),
                 disaggregated_mindful, cores = 8, iter = 1000, silent = TRUE, seed = 6523)
-
-equatiomatic::extract_eq(lme4::lmer(resp ~ 1 + trial_cond * dot_between_std_noc +
-                         trial_cond * dot_within_std +
-                         (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),
-                disaggregated_mindful))
 ```
 
-##### plots {.tabset}
-###### between-person {.tabset}
+### plots {.tabset}
+#### between-person {.tabset}
 ```{r, fig.width=7, fig.height=5.5}
 points_between = disaggregated_mindful %>%
   select(pID, resp, trial_cond, dot_between_std_noc) %>%
@@ -472,7 +264,7 @@ predicted %>%
   theme(legend.position = "top")
 ```
 
-###### within-person only
+#### within-person
 ```{r, fig.width=7, fig.height=5.5}
 points_within = disaggregated_mindful %>%
   select(pID, resp, trial_cond, dot_within_std) %>%
@@ -480,8 +272,7 @@ points_within = disaggregated_mindful %>%
          group = factor(group, levels = c("reactivity", "mindful attention")),
          type = "within-person") %>%
   rename("x" = dot_within_std,
-         "predicted" = resp) #%>%
-  #filter(x < 2 & x > -2)
+         "predicted" = resp)
 
 vals = seq(-4,4,.2)
 predicted = ggeffects::ggpredict(mod_h2_int, c("dot_within_std [vals]", "trial_cond"), type = "fe") %>%
@@ -502,71 +293,38 @@ predicted %>%
   theme(legend.position = "top")
 ```
 
-##### table
+### table
 ```{r}
 make_table(mod_h2_int)
 ```
 
-##### simple slopes
+### simple slopes
 ```{r}
 emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_between_std_noc") %>%
     data.frame() %>%
     mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std_noc.trend, lower.HPD, upper.HPD),
            trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [95% CI]`)
+  select(trial_cond, `b [95% CI]`) %>%
+      knitr::kable()
 
 emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_within_std") %>%
     data.frame() %>%
     mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
            trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [95% CI]`)
+  select(trial_cond, `b [95% CI]`) %>%
+      knitr::kable()
 ```
 
-##### summary
+### summary
 ```{r}
 summary(mod_h2_int)
 ```
 
-# planned exploratory task analyses
-## E1 {.tabset}
-> To examine divergent validity, we will apply the mindful attention signature to data from a separate group of participants who were instructed to use a different form of cognitive regulation (i.e., not mindful attention) that is not expected to rely on the same brain regions. We expect lower than chance accuracy decoding alcohol regulation versus reactivity trials.
+# sensitivity analyses
+## mindful signature attention: discriminant validity {.tabset}
+> To examine discriminant validity, we will apply the mindful attention signature to data from a separate group of participants who were instructed to use a different form of cognitive regulation (i.e., not mindful attention) that is not expected to rely on the same brain regions. We expect lower than chance accuracy decoding alcohol regulation versus reactivity trials.
 
-I haven't done what we laid out in our prereg yet, but here are the same analyses from H1b for the perspective taking group. The classifier is much less accurate in this group (accuracy = 54%) than in the mindful attention group.
-
-### means {.tabset}
-#### plot
-```{r}
-data_means = merged %>%
-  filter(condition == "perspective-taking")
-
-data_means %>%
-  ggplot(aes(trial_cond, dot, color = trial_cond, fill = trial_cond)) +
-  stat_summary(fun.data = "mean_cl_boot", geom = "bar") +
-  stat_summary(fun.data = "mean_cl_boot", geom = "errorbar", width = 0, color = "black") +
-  scale_color_manual(name = "", values = palette) +
-  scale_fill_manual(name = "", values = palette) +
-  labs(x = "\ntrial type", y = "signature expression (dot product)\n") +
-  plot_aes +
-  theme(legend.position = "none")
-```
-
-#### run model
-```{r, cache=FALSE, include = FALSE}
-mod_e1 = brms::brm(dot ~ trial_cond + (1 | pID), data = data_means,
-                   cores = 8, iter = 1000, silent = TRUE, seed = 6523)
-```
-
-##### table
-```{r}
-make_table(mod_e1)
-```
-
-#### summary
-```{r}
-summary(mod_e1)
-```
-
-### ROC 
+### ROC plot
 ```{r, fig.width=7, fig.height=6.5}
 acc_line1 = data.frame(x = c(0, 1), y = c(1, 1))
 acc_line2 = data.frame(y = c(0, 1), x = c(0, 0))
@@ -609,198 +367,23 @@ conf_data = merged %>%
 caret::confusionMatrix(conf_data$predicted, conf_data$trial_cond)
 ```
 
-## E2 {.tabset}
-> We will explore whether expression of the mindful attention signature varies naturally during alcohol cue reactivity among participants not instructed to use mindful attention, and the degree to which expression is related to cravings.
-
-**Results**
-
-Between-person: `r emo::ji("check")` `r emo::ji("x")` People with stronger expression of the mindful attention signature on average also report lower craving ratings during exposure to alcohol cues. However, the credible interval includes zero.
-
-Within-person: `r emo::ji("check")` Stronger expression of the mindful attention signature compared to one's average is associated with lower craving ratings during exposure to alcohol cues. 
-
-### run model
-```{r, cache=FALSE, include = FALSE}
-mod_e2 = brms::brm(resp ~ dot_between_std_noc + dot_within_std +
-                (1 + dot_within_std | pID) + (1 | stimulus), data = disaggregated_control,
-                cores = 8, iter = 1000, silent = TRUE, seed = 6523)
-```
-
-### plot
-```{r, fig.width=6, fig.height=5}
-predicted = ggeffects::ggpredict(mod_e2, c("dot_between_std_noc [-2:2]"), type = "fe") %>%
-  data.frame() %>%
-  mutate(type = "between-person") %>%
-  bind_rows(ggeffects::ggpredict(mod_e2, c("dot_within_std [-2:2]"), type = "fe") %>%
-              data.frame() %>%
-              mutate(type = "within-person"))
-
-predicted %>%
-  ggplot(aes(x, predicted, color = type, fill = type)) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
-  geom_line(size = 1) +
-  scale_fill_manual(name = "", values = palette[3:4]) +
-  scale_color_manual(name = "", values = palette[3:4]) +
-  labs(y = "predicated craving rating\n", x = "\nsignature expression (SD)") +
-  plot_aes +
-  theme(legend.position = "top")
-```
-
-### table
+## confidence rating analyses {.tabset}
 ```{r}
-make_table(mod_e2)
-```
-
-### summary
-```{r}
-summary(mod_e2)
-```
-
-## E3 {.tabset}
-> We will also explore the degree to which variability in mindful attention throughout the task is related to alcohol cravings on average. We expect that participants who more consistently express the mindful attention signature also report lower craving over the task.
-
-**Results**
-
-`r emo::ji("check")` `r emo::ji("x")` Lower variability in expression of the mindful attention signature is related to lower cravings. However, the credible interval includes zero.
-
-### check variability {.tabset}
-#### expression sd by trial condition
-```{r}
-e3_data = merged %>%
-  filter(condition == "mindful attention") %>%
-  group_by(pID, trial_cond, trial_cond_recode) %>%
-  mutate(dot_sd = sd(dot, na.rm = TRUE),
-         mean_expression = mean(dot, na.rm = TRUE))
-
-e3_data %>%
-  select(pID, trial_cond, dot_sd) %>%
-  unique() %>%
-  ggplot(aes(dot_sd, fill = trial_cond)) +
-  geom_density(color = NA, alpha = .5) +
-  scale_fill_manual(values = palette) +
-  plot_aes
-
-```
-
-#### expression by person
-```{r, fig.width=14, fig.height=12}
-e3_data %>%
-  ggplot(aes(dot, fill = trial_cond)) +
-  geom_density(color = NA, alpha = .5) +
-  facet_wrap(~pID) +
-  scale_fill_manual(values = palette) +
-  plot_aes
-```
-
-
-### run model
-```{r, cache=FALSE, include = FALSE}
-mod_e3 = brms::brm(resp ~ trial_cond * dot_sd +
-                (1 + trial_cond | pID) + (1 | stimulus), data = e3_data,
-                cores = 8, iter = 1000, silent = TRUE, seed = 6523)
-```
-
-### plot
-```{r, fig.width=6.5, fig.height=5}
-predicted = ggeffects::ggpredict(mod_e3, c("dot_sd", "trial_cond"), type = "fe") %>%
-  data.frame() %>%
-  mutate(group = recode(group, "regulation" = "mindful attention"),
-         group = factor(group, levels = c("reactivity", "mindful attention")))
-
-predicted %>%
-  ggplot(aes(x, predicted, color = group, fill = group)) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
-  geom_line(aes(group = group), size = 1) +
-  scale_fill_manual(name = "trial type", values = palette) +
-  scale_color_manual(name = "trial type", values = palette) +
-  labs(y = "predicated craving rating\n", x = "\nsignature expression variability (SD)") +
-  plot_aes +
-  theme(legend.position = "top")
-```
-
-### table
-```{r}
-make_table(mod_e3)
-```
-
-### summary
-```{r}
-summary(mod_e3)
-```
-
-# post-hoc confidence rating analyses {.tabset}
-```{r}
-ratings = read.csv("../data/task/post_scan_ratings.csv", stringsAsFactors = FALSE) %>%
-  select(DistributionChannel, pID, mindful2) %>%
-  filter(DistributionChannel == "anonymous" & grepl("muri|MURI", pID)) %>%
-  extract(pID, c("pID", "number"), "(.*)([0-9]{3})") %>%
-  mutate(pID = ifelse(pID %in% c("muri", "MURI"), "MURIP", pID),
-         pID = sprintf("sub-%s%s", toupper(pID), number),
-         confidence_rating = scale(as.numeric(mindful2), center = TRUE, scale = TRUE)) %>%
-  select(-number, -mindful2, -DistributionChannel)
-  
 merged_ratings = disaggregated_mindful %>%
   left_join(., ratings)
-
-merged_ratings %>%
-  ggplot(aes(confidence_rating)) +
-  geom_density(color = NA, fill = palette[1]) +
-  plot_aes
 ```
 
-## craving {.tabset}
-### run model
-```{r, cache=FALSE, include = FALSE}
-mod_ph_craving = brms::brm(resp ~ confidence_rating * trial_cond + (1 + trial_cond | pID),
-                           data = merged_ratings,
-                cores = 8, iter = 1000, silent = TRUE, seed = 6523)
-```
+### signature expression ~ confidence ratings {.tabset}
+> We examined the degree to which confidence ratings were associated with neural signature expression
 
-### plot
-```{r}
-vals = seq(-3,3,.2)
-ggeffects::ggpredict(mod_ph_craving, terms = c("confidence_rating [vals]", "trial_cond")) %>%
-  data.frame() %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention"))) %>%
-  ggplot(aes(x, predicted, color = group, fill = group)) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
-  geom_line(size = 2) +
-  scale_fill_manual(name = "trial type", values = palette) +
-  scale_color_manual(name = "trial type", values = palette) +
-  labs(x = "instruction confidence rating (SD)",
-       y = "craving rating\n") +
-  plot_aes +
-  theme(legend.position = "top")
-```
-
-### table
-```{r}
-make_table(mod_ph_craving)
-```
-
-### simple slopes
-```{r}
-emmeans::emtrends(mod_ph_craving, ~ trial_cond, var="confidence_rating") %>%
-    data.frame() %>%
-    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", confidence_rating.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [95% CI]`)
-```
-
-### summary
-```{r}
-summary(mod_ph_craving)
-```
-
-## signature expression {.tabset}
-### run model
+#### run model
 ```{r, cache=FALSE, include = FALSE}
 mod_ph_expression = brms::brm(dot ~ confidence_rating * trial_cond + (1 + trial_cond | pID),
                            data = merged_ratings,
                 cores = 8, iter = 1000, silent = TRUE, seed = 6523)
 ```
 
-### plot
+#### plot
 ```{r}
 ggeffects::ggpredict(mod_ph_expression, terms = c("confidence_rating", "trial_cond")) %>%
   data.frame() %>%
@@ -817,27 +400,30 @@ ggeffects::ggpredict(mod_ph_expression, terms = c("confidence_rating", "trial_co
   theme(legend.position = "top")
 ```
 
-### table
+#### table
 ```{r}
 make_table(mod_ph_expression)
 ```
 
-### simple slopes
+#### simple slopes
 ```{r}
 emmeans::emtrends(mod_ph_expression, ~ trial_cond, var="confidence_rating") %>%
     data.frame() %>%
     mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", confidence_rating.trend, lower.HPD, upper.HPD),
            trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [95% CI]`)
+  select(trial_cond, `b [95% CI]`) %>%
+      knitr::kable()
 ```
 
-### summary
+#### summary
 ```{r}
 summary(mod_ph_expression)
 ```
 
-## H2 & H3 controlling for confidence ratings {.tabset}
-### run model {.tabset}
+### H2 controlling for confidence ratings {.tabset}
+> We examined the degree to which controlling for confidence ratings affected the results for H2
+
+#### run model {.tabset}
 ```{r, cache=FALSE, include = FALSE}
 mod_ph_h2 = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
                          trial_cond * dot_within_std + confidence_rating + 
@@ -846,8 +432,8 @@ mod_ph_h2 = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
                        cores = 8, iter = 1000, silent = TRUE, seed = 6523)
 ```
 
-### plots {.tabset}
-#### between-person {.tabset}
+#### plots {.tabset}
+##### between-person {.tabset}
 ```{r, fig.width=7, fig.height=5.5}
 points_between = disaggregated_mindful %>%
   select(pID, resp, trial_cond, dot_between_std_noc) %>%
@@ -880,7 +466,7 @@ predicted %>%
   theme(legend.position = "top")
 ```
 
-#### within-person only
+##### within-person only
 ```{r, fig.width=7, fig.height=5.5}
 points_within = disaggregated_mindful %>%
   select(pID, resp, trial_cond, dot_within_std) %>%
@@ -909,32 +495,34 @@ predicted %>%
   theme(legend.position = "top")
 ```
 
-### table
+#### table
 ```{r}
 make_table(mod_ph_h2)
 ```
 
-### simple slopes
+#### simple slopes
 ```{r}
 emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_between_std_noc") %>%
     data.frame() %>%
     mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std_noc.trend, lower.HPD, upper.HPD),
            trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [95% CI]`)
+  select(trial_cond, `b [95% CI]`) %>%
+      knitr::kable()
 
 emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_within_std") %>%
     data.frame() %>%
     mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
            trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [95% CI]`)
+  select(trial_cond, `b [95% CI]`) %>%
+      knitr::kable()
 ```
 
-### summary
+#### summary
 ```{r}
 summary(mod_ph_h2)
 ```
 
-### compare posterior distributions
+#### compare posterior distributions
 Compare preregistered model with the modeling controlling for confidence ratings
 
 ```{r}
@@ -949,15 +537,6 @@ posterior = posterior_samples(mod_h2_int) %>%
               gather(`trial type`, value) %>%
               mutate(model = "controlling for confidence")) %>% 
   mutate(model = factor(model, levels = c("original model", "controlling for confidence")))
-
-posterior %>%
-  ggplot(aes(y = "", x = value, fill = `trial type`)) +
-  stat_halfeye(alpha = .5) +
-  scale_fill_manual(values = c(palette[2], palette[1])) +
-  facet_grid(~model) +
-  scale_y_discrete(expand = c(.1, .1)) +
-  labs(x = "\nregression coefficient\n", y = "") + 
-  plot_aes
 
 posterior %>%
   ggplot(aes(y = "", x = value, fill = model)) +

@@ -1,5 +1,5 @@
 ---
-title: "Neural signature holdout"
+title: "Neural signature development: holdout sample"
 author: "Dani Cosme"
 date: "`r Sys.Date()`"
 output:
@@ -45,9 +45,9 @@ plot_aes = theme_minimal() +
 
 # load and tidy data {.tabset}
 ```{r}
-metadata = read.csv("../data/metadata/metadata_cuereact.csv", stringsAsFactors = FALSE)
+metadata = read.csv("../data_raw/metadata/metadata_cuereact.csv", stringsAsFactors = FALSE)
 
-classifier_data = read.csv("../data/dots_cond.csv", stringsAsFactors = FALSE) %>%
+classifier_data = read.csv("../data_raw/dots_cond.csv", stringsAsFactors = FALSE) %>%
   extract(file, c("subjectID", "trial_type", "condition", "run"),
           ".*/(MURIC[0-9]{3}|MURIP[0-9]{3})_(alc_react|downreg)_(.*)_([1-4]{1})") %>%
   mutate(run = as.numeric(run)) %>%
@@ -64,30 +64,6 @@ classifier_data = read.csv("../data/dots_cond.csv", stringsAsFactors = FALSE) %>
 # mindfulness signature development analysis
 
 > First, we partitioned the data into two sets as follows: 75% of the data was used in the development of the signature (i.e., the development set), and 25% will be withheld as a hold out, or “lockbox” set to test out of sample accuracy once the signature has been satisfactorily developed in the development set. This procedure reduces the risk of decreased generalizability due to overfitting during signature development (Hosseini et al., 2020). 
-
-`r emo::ji("x")` Out of sample predictive accuracy in the hold out sample is not significantly above chance
-
-## ROC 
-```{r, fig.width=5, fig.height=4.5}
-classifier_data %>%
-  do({
-    condition = .$condition
-    pred = prediction(.$predicted, .$actual)
-    perf = performance(pred, measure = "tpr", x.measure = "fpr")
-    data.frame(cut = perf@alpha.values[[1]],fpr = perf@x.values[[1]],tpr = perf@y.values[[1]])
-  }) %>%
-  ggplot(aes(fpr, tpr)) +
-    geom_line(color = palette[4], size = 1) +
-    geom_abline(intercept = 0, slope = 1) +
-    scale_x_continuous(breaks = seq(0, 1, .2)) +
-    scale_y_continuous(breaks = seq(0, 1, .2)) +
-    labs(x = "\nfalse positive rate (1 - specificity)", y = "true positive rate (sensitivity)\n") +
-    theme(legend.position = c(.8, .3),
-          legend.spacing.y = unit(-.1, "cm")) +
-   plot_aes
-```
-
-## confusion matrix
 
 ```{r}
 caret::confusionMatrix(classifier_data$predicted_factor, classifier_data$actual_factor)

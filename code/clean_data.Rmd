@@ -1,0 +1,186 @@
+---
+title: "Clean data"
+author: "Dani Cosme"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    theme: united
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+options(scipen = 999)
+```
+
+This code cleans the data for the following manuscript:
+
+[Cosme, D., Helion, C., et al. (2023) Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
+
+# load packages
+```{r}
+library(pacman)
+pacman::p_load(tidyverse, install = TRUE)
+```
+
+# load and tidy data {.tabset}
+* remove trials missing stimulus information
+  * the following participants had technical errors during all mindful attention trials: sub-MURIP012, sub-MURIP063, sub-MURIP078
+* remove trials in which the mean signal intensity of the brain map is +/- 3 SDs from the mean
+
+## task
+```{r}
+task_data = read.csv("../data_raw/task/cuereact_all062920.csv", stringsAsFactors = FALSE) %>%
+  filter(grepl("rating", trial_type)) %>%
+  select(pID, block_num, trial_num, trial_type, resp, rt, stim) %>%
+  mutate(trial_cond = ifelse(grepl("friend3|friend4", trial_type), "regulation",
+                      ifelse(grepl("friend1|friend2", trial_type), "up-regulation",
+                      ifelse(grepl("mindful", trial_type), "regulation",
+                      ifelse(grepl("nonalc", trial_type), "non-alcohol reactivity",
+                      ifelse(grepl("rating_alc_react", trial_type), "reactivity", NA))))),
+         trial_cond = factor(trial_cond, levels = c("non-alcohol reactivity", "reactivity", "regulation", "up-regulation"))) %>%
+  rename("stimulus" = stim) %>%
+  filter(!is.na(stimulus))
+
+task_conditions = task_data %>%
+  select(pID, trial_type) %>%
+  unique() %>%
+  filter(grepl("friend|mindful", trial_type) | pID %in% c("sub-MURIP012", "sub-MURIP063", "sub-MURIP078")) %>%
+  mutate(condition = ifelse(grepl("friend", trial_type), "perspective-taking", "mindful attention")) %>%
+  select(-trial_type) %>%
+  unique()
+
+task_data_all = task_data %>%
+  left_join(., task_conditions) %>%
+  mutate(condition = ifelse(is.na(condition), "control", condition),
+         trial_cond = factor(trial_cond, c("non-alcohol reactivity", "reactivity", "regulation", "up-regulation")))
+```
+
+## dots
+```{r}
+file_dir = "../data_raw/dots"
+file_pattern = "sub.*"
+file_list = list.files(file_dir, pattern = file_pattern)
+
+dots_tmp = data.frame()
+
+for (file in file_list) {
+  tmp = tryCatch(read.table(file.path(file_dir,file), fill = TRUE, header = TRUE, sep = ",") %>%
+                    extract(file, c("pID", "beta"), ".*(sub-MURIC[0-9]{3}|sub-MURIP[0-9]{3})/(beta_[0-9]{4}).nii") %>%
+                    mutate(stimulus = as.character(stimulus)), error = function(e) message(file))
+  
+  dots_tmp = rbind(dots_tmp, tmp)
+  rm(tmp)
+}
+
+dots = dots_tmp %>%
+  left_join(., task_conditions) %>%
+  mutate(condition = ifelse(is.na(condition), "control", condition)) %>%                                              
+  group_by(pID) %>%
+  filter(!stimulus == "nan") %>%
+  mutate(sd3_signal = 3 * sd(mean_signal, na.rm = TRUE),
+         grand_mean_signal = mean(mean_signal, na.rm = TRUE),
+         outlier = ifelse(mean_signal > grand_mean_signal + sd3_signal, 1,
+                   ifelse(mean_signal < grand_mean_signal - sd3_signal, 1, 0))) %>%
+  select(-sd3_signal, -grand_mean_signal) %>%
+  filter(!outlier == 1)
+```
+
+## classifier data
+```{r}
+classifier_data = read.csv("../data_raw/mvpa/logistic_stats.csv", stringsAsFactors = FALSE) %>%
+  rename("pID" = subjectID) %>%
+    mutate(predicted_factor = ifelse(predicted > .5, "regulate", "react"),
+           predicted_factor = as.factor(predicted_factor),
+           actual_factor = ifelse(actual == 1, "regulate", "react"),
+           actual_factor = as.factor(actual_factor))
+```
+
+## post-task confience ratings
+```{r}
+ratings = read.csv("../data_raw/task/post_scan_ratings.csv", stringsAsFactors = FALSE) %>%
+  select(DistributionChannel, pID, mindful2) %>%
+  filter(DistributionChannel == "anonymous" & grepl("muri|MURI", pID)) %>%
+  extract(pID, c("pID", "number"), "(.*)([0-9]{3})") %>%
+  mutate(pID = ifelse(pID %in% c("muri", "MURI"), "MURIP", pID),
+         pID = sprintf("sub-%s%s", toupper(pID), number),
+         confidence_rating = scale(as.numeric(mindful2), center = TRUE, scale = TRUE)) %>%
+  select(-number, -mindful2, -DistributionChannel)
+```
+
+## EMA data
+```{r}
+ema = read.csv("../data_raw/ema/cleaned_EMA.csv", stringsAsFactors = FALSE) %>%
+  select(pID, Condition, contains("signal"), Session.Name, active_week, drinks_number, contains("Craving"), contains("React")) %>%
+  rename("condition" = Condition) %>%
+  filter(condition == "mindful") %>%
+  group_by(pID) %>%
+  mutate(condition = gsub("mindful", "mindful attention", condition),
+         pID = gsub("muric", "sub-MURIC", pID),
+         pID = gsub("muri", "sub-MURIP", pID),
+         active_week = gsub("active", "on", active_week),
+         active_week = gsub("control", "off", active_week),
+         drinks_number_noc = drinks_number,
+         drinks_number = scale(drinks_number, center = TRUE, scale = FALSE),
+         mindful_response = scale(Alc_React_Mindful, center = TRUE, scale = TRUE),
+         craving_previous = lag(Craving_Alc),
+         craving_previous = scale(craving_previous, center = TRUE, scale = TRUE),
+         craving = scale(Craving_Alc, center = TRUE, scale = TRUE))
+```
+
+## merge and prep for modeling
+* filter out motion exclusions: sub-MURIC303
+* filter out reactivity to non-alcoholic beverage trials
+* create disaggregated_mindful dataset
+  * `dot_within_std` = within-person centered level-1 signature expression variable; standardized across participants
+  * `dot_between_std` = grand-mean centered level-2 signature expression variable; standardized across participants
+* due to a technical errror, the following participants are missing behavioral data from mindful attention trials: sub-MURIP063, sub-MURIP078, sub-MURIP012
+
+```{r}
+merged = task_data_all %>%
+  full_join(., dots) %>%
+  filter(!pID == "sub-MURIC303") %>%
+  filter(trial_cond %in% c("reactivity", "regulation")) %>%
+  mutate(trial_cond = as.factor(as.character(trial_cond)))
+
+between = merged %>%
+  select(pID, dot, trial_cond, condition) %>%
+  group_by(pID, trial_cond, condition) %>%
+  summarize(dot_between = mean(dot, na.rm = TRUE)) %>%
+  group_by(condition) %>%
+  mutate(sd_dot = sd(dot_between, na.rm = TRUE),
+         dot_between_std_noc = dot_between / sd_dot) %>%
+  select(-sd_dot)
+
+within = merged %>%
+  select(pID, block_num, trial_num, dot, condition, trial_cond) %>%
+  group_by(pID, condition) %>%
+  mutate(dot_within_c = scale(dot, scale = FALSE, center = TRUE)) %>%
+  group_by(condition) %>%
+  mutate(sd_dot = sd(dot_within_c, na.rm = TRUE),
+         dot_within_std = dot_within_c / sd_dot) %>%
+  select(-sd_dot)
+
+disaggregated = merged %>%
+  left_join(., between, by = c("pID", "condition", "trial_cond")) %>%
+  left_join(., within, by = c("pID", "condition", "trial_num", "block_num", "trial_cond", "dot")) %>%
+  filter(trial_cond %in% c("reactivity", "regulation"))
+```
+
+# write csvs 
+```{r}
+write.csv(merged, "../data/task_neuro_data.csv", row.names = FALSE)
+write.csv(disaggregated, "../data/disaggregated_data.csv", row.names = FALSE)
+write.csv(classifier_data, "../data/classifier_data.csv", row.names = FALSE)
+write.csv(ratings, "../data/ratings.csv", row.names = FALSE)
+write.csv(ema, "../data/ema.csv", row.names = FALSE)
+```
+

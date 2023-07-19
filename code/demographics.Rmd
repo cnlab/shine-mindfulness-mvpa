@@ -112,7 +112,7 @@ summary_table = function(data, variable, race_summarized = TRUE) {
 # load and tidy data {.tabset}
 ## demographics
 ```{r}
-duplicate_ids = read.csv("../data/demographics/MURI_Master_Participants - Overview.csv", stringsAsFactors = FALSE) %>%
+duplicate_ids = read.csv("../data_raw/demographics/MURI_Master_Participants - Overview.csv", stringsAsFactors = FALSE) %>%
   filter(duplicate > 0) %>%
   select(pID, duplicate, duplicate_id) %>%
   group_by(duplicate) %>%
@@ -122,10 +122,10 @@ duplicate_ids = read.csv("../data/demographics/MURI_Master_Participants - Overvi
   ungroup() %>%
   select(pID, newID)
   
-completion_data = read.csv("../data/demographics/cleaned_completion_data.csv") %>%
+completion_data = read.csv("../data_raw/demographics/cleaned_completion_data.csv") %>%
   spread(key, value)
 
-demo_all = read.csv("../data/demographics/master_demo.csv") %>%
+demo_all = read.csv("../data_raw/demographics/master_demo.csv") %>%
   mutate(StartDate = gsub(" .*", "", StartDate),
          StartDate = gsub("/21$", "/2021", StartDate),
          StartDate = gsub("/20$", "/2020", StartDate),
@@ -168,7 +168,7 @@ demo_noduplicates = demo_all %>%
 
 ## task
 ```{r}
-task = read.csv("../data/task/cuereact_all062920.csv", stringsAsFactors = FALSE) %>%
+task = read.csv("../data_raw/task/cuereact_all062920.csv", stringsAsFactors = FALSE) %>%
   filter(grepl("rating", trial_type)) %>%
   select(pID, block_num, trial_num, trial_type, resp, rt, stim) %>%
   mutate(trial_cond = ifelse(grepl("friend3|friend4", trial_type), "regulation",
@@ -192,7 +192,7 @@ task = read.csv("../data/task/cuereact_all062920.csv", stringsAsFactors = FALSE)
 
 ## EMA
 ```{r}
-ema = read.csv("../data/ema/cleaned_EMA.csv", stringsAsFactors = FALSE) %>%
+ema = read.csv("../data_raw/ema/cleaned_EMA.csv", stringsAsFactors = FALSE) %>%
   select(pID, Condition) %>%
   unique() %>%
   mutate(pID = gsub("muric", "sub-MURIC", pID),
