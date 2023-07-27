@@ -1,6 +1,6 @@
 ---
 title: "Neural signature development: holdout sample"
-author: "Dani Cosme"
+author: ""
 date: "`r Sys.Date()`"
 output:
   html_document:

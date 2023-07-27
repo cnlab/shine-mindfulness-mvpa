@@ -1,6 +1,6 @@
 ---
 title: "fMRI task analyses"
-author: "Dani Cosme"
+author: ""
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -17,13 +17,13 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.path = "figs/", dpi = 300, colormodel = "cmyk", cache = FALSE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, dpi = 300, colormodel = "cmyk")
 options(scipen = 999)
 ```
 
 This code reproduces the fMRI analyses reported in the following manuscript:
 
-[Cosme, D., Helion, C., et al. (2023) Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
+[Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
 
 # load packages
 ```{r}
@@ -184,7 +184,7 @@ caret::confusionMatrix(conf_data$predicted, conf_data$trial_cond)
 `r emo::ji("check")` Compared to reactivity trials, mindful attention trials will be associated with decreased craving 
 
 ### run model
-```{r, cache=FALSE, include = FALSE}
+```{r, cache=TRUE, include = FALSE}
 mod_behavior = brms::brm(resp ~ 1 + trial_cond +
                 (1 + trial_cond | pID) + (1 | stimulus),
                 disaggregated_mindful, cores = 8, iter = 1000, silent = TRUE, seed = 6523)
@@ -223,7 +223,7 @@ summary(mod_behavior)
 `r emo::ji("x")` B: We expect that trials with greater expression of the mindful attention signature compared to one’s average (i.e., L1, within-person expression) will be associated with lower craving ratings on a trial-by-trial basis.
 
 ### run model {.tabset}
-```{r, cache = TRUE, include = FALSE}
+```{r, cache=TRUE, include = FALSE}
 mod_h2_int = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
                          trial_cond * dot_within_std +
                          (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),
@@ -377,7 +377,7 @@ merged_ratings = disaggregated_mindful %>%
 > We examined the degree to which confidence ratings were associated with neural signature expression
 
 #### run model
-```{r, cache=FALSE, include = FALSE}
+```{r, cache=TRUE, include = FALSE}
 mod_ph_expression = brms::brm(dot ~ confidence_rating * trial_cond + (1 + trial_cond | pID),
                            data = merged_ratings,
                 cores = 8, iter = 1000, silent = TRUE, seed = 6523)
@@ -424,7 +424,7 @@ summary(mod_ph_expression)
 > We examined the degree to which controlling for confidence ratings affected the results for H2
 
 #### run model {.tabset}
-```{r, cache=FALSE, include = FALSE}
+```{r, cache=TRUE, include = FALSE}
 mod_ph_h2 = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
                          trial_cond * dot_within_std + confidence_rating + 
                          (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),

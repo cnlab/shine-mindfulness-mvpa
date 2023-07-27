@@ -1,6 +1,6 @@
 ---
 title: "Clean data"
-author: "Dani Cosme"
+author: ""
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -23,7 +23,7 @@ options(scipen = 999)
 
 This code cleans the data for the following manuscript:
 
-[Cosme, D., Helion, C., et al. (2023) Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
+[Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
 
 # load packages
 ```{r}
