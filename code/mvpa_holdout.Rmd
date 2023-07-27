@@ -45,9 +45,9 @@ plot_aes = theme_minimal() +
 
 # load and tidy data {.tabset}
 ```{r}
-metadata = read.csv("../data_raw/metadata/metadata_cuereact.csv", stringsAsFactors = FALSE)
+metadata = read.csv("../data/mvpa_metadata.csv", stringsAsFactors = FALSE)
 
-classifier_data = read.csv("../data_raw/dots_cond.csv", stringsAsFactors = FALSE) %>%
+classifier_data = read.csv("../data/mvpa_expression.csv", stringsAsFactors = FALSE) %>%
   extract(file, c("subjectID", "trial_type", "condition", "run"),
           ".*/(MURIC[0-9]{3}|MURIP[0-9]{3})_(alc_react|downreg)_(.*)_([1-4]{1})") %>%
   mutate(run = as.numeric(run)) %>%

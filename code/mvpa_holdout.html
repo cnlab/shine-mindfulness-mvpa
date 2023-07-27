@@ -2951,9 +2951,9 @@ sample</h1>
 </div>
 <div id="load-and-tidy-data" class="section level1 tabset">
 <h1 class="tabset">load and tidy data</h1>
-<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>metadata <span class="ot">=</span> <span class="fu">read.csv</span>(<span class="st">&quot;../data_raw/metadata/metadata_cuereact.csv&quot;</span>, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>metadata <span class="ot">=</span> <span class="fu">read.csv</span>(<span class="st">&quot;../data/mvpa_metadata.csv&quot;</span>, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
 <span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>classifier_data <span class="ot">=</span> <span class="fu">read.csv</span>(<span class="st">&quot;../data_raw/dots_cond.csv&quot;</span>, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>) <span class="sc">%&gt;%</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>classifier_data <span class="ot">=</span> <span class="fu">read.csv</span>(<span class="st">&quot;../data/mvpa_expression.csv&quot;</span>, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>) <span class="sc">%&gt;%</span></span>
 <span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">extract</span>(file, <span class="fu">c</span>(<span class="st">&quot;subjectID&quot;</span>, <span class="st">&quot;trial_type&quot;</span>, <span class="st">&quot;condition&quot;</span>, <span class="st">&quot;run&quot;</span>),</span>
 <span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>          <span class="st">&quot;.*/(MURIC[0-9]{3}|MURIP[0-9]{3})_(alc_react|downreg)_(.*)_([1-4]{1})&quot;</span>) <span class="sc">%&gt;%</span></span>
 <span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">run =</span> <span class="fu">as.numeric</span>(run)) <span class="sc">%&gt;%</span></span>
