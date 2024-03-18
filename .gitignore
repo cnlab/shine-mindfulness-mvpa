@@ -9,4 +9,6 @@ code/figs/
 code/figs_ema/
 code/analysis_ema_cache/
 code/analysis_task_cache/
+code/analysis_ema_files/
+code/analysis_task_files/
 **cache**

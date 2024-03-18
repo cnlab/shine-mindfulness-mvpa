@@ -39,6 +39,7 @@ palette = c("#e64626", "#1985a1", "#4c5c68", "#FAC748")
 plot_aes = theme_minimal() +
   theme(legend.position = "top",
         legend.text = element_text(size = 16),
+        plot.title = element_text(hjust = 0.5),
         text = element_text(size = 18, family = "Futura Medium"),
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
@@ -47,28 +48,11 @@ plot_aes = theme_minimal() +
         axis.ticks.y = element_blank())
 ```
 
-# define functions
-```{r}
-make_table = function(data) {
-    data %>%
-      broom.mixed::tidy(conf.int = TRUE) %>%
-      filter(effect == "fixed") %>%
-      mutate(term = gsub("\\(Intercept\\)", "intercept", term),
-             term = gsub("regulation_expression", "signature expression", term),
-             term = gsub("active_weekon", "intervention week (active)", term),
-             term = gsub("active_weekoff", "intervention week (control)", term),
-             term = gsub("signal_count", "signal", term),
-             term = gsub(":", " x ", term),
-             `b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high)) %>%
-      select(term, `b [95% CI]`) %>%
-      knitr::kable(digits = 2)
-}
-```
-
 # load data
 ```{r}
 merged = read.csv("../data/task_neuro_data.csv", stringsAsFactors = FALSE)
 ema = read.csv("../data/ema.csv")
+maas = read.csv("../data/MAAS.csv", stringsAsFactors = FALSE)
 ```
 
 ## merge and prep for modeling
@@ -87,11 +71,91 @@ between = merged %>%
   spread(trial_cond, dot_between_std)
 
 ema_within = ema %>%
-  left_join(., between)
+  left_join(., between) %>%
+  left_join(., maas)
 ```
 
 # descriptives {.tabset}
-## weekly drinking
+## craving
+```{r}
+ema_within %>%
+  filter(!is.na(active_week)) %>%
+  mutate(active_week = ifelse(active_week == "on", "active",
+                       ifelse(active_week == "off", "control", NA))) %>%
+  group_by(active_week) %>%
+  summarize(M = mean(Craving_Alc, na.rm = TRUE),
+          SD = sd(Craving_Alc, na.rm = TRUE)) %>%
+  knitr::kable(digits = 1, format = "pandoc")
+```
+
+## mindful responses
+```{r}
+ema_within %>%
+  mutate(active_week = ifelse(active_week == "on", "active",
+                       ifelse(active_week == "off", "control", NA))) %>%
+  filter(!is.na(active_week)) %>%
+  group_by(active_week) %>%
+  summarize(M = mean(Alc_React_Mindful, na.rm = TRUE),
+          SD = sd(Alc_React_Mindful, na.rm = TRUE)) %>%
+  knitr::kable(digits = 1, format = "pandoc")
+```
+
+## weekly alcohol consumption across conditions
+```{r}
+ema_within %>%
+  mutate(week = ifelse(signal_count %in% c(1:14), 1,
+                ifelse(signal_count %in% c(15:28), 2,
+                ifelse(signal_count %in% c(29:42), 3, 4)))) %>%
+  group_by(pID, week) %>%
+  summarize(sum = sum(drinks_number_noc, na.rm = TRUE)) %>%
+  ungroup() %>%
+  summarize(min = min(sum),
+            max = max(sum),
+            mean = mean(sum),
+            sd = sd(sum)) %>%
+  kable(digits = 1, format = "pandoc")
+```
+
+## percentage of days consuming alcohol
+```{r}
+ema_within %>%
+  arrange(pID, Notification.Time) %>% 
+  group_by(pID) %>% 
+  mutate(date = lag(date)) %>% #lag date to align with week assignment for switches between conditions (which report on the previous day)
+  filter(!is.na(active_week)) %>%
+  mutate(active_week = ifelse(active_week == "on", "active",
+                       ifelse(active_week == "off", "control", NA))) %>%
+  group_by(pID, date, active_week) %>%
+  summarize(sum = sum(HadAlcohol, na.rm = TRUE)) %>%
+  mutate(consumed_alcohol = ifelse(sum > 0, 1, 0)) %>%
+  group_by(pID, active_week) %>%
+  summarize(n_days = n(),
+            drinking_days = sum(consumed_alcohol)) %>%
+  mutate(percent = (drinking_days / n_days) * 100) %>%
+  group_by(active_week) %>%
+  summarize(min = min(percent),
+            max = max(percent),
+            M = mean(percent),
+            SD = sd(percent)) %>%
+  kable(digits = 1, format = "pandoc")
+```
+
+## alcohol consumption when drinking
+```{r}
+ema_within %>%
+  filter(!is.na(active_week)) %>%
+  filter(HadAlcohol == 1) %>%
+  mutate(active_week = ifelse(active_week == "on", "active",
+                       ifelse(active_week == "off", "control", NA))) %>%
+  group_by(active_week) %>%
+  summarize(min = min(drinks_number_noc, na.rm = TRUE),
+            max = max(drinks_number_noc, na.rm = TRUE),
+            M = mean(drinks_number_noc, na.rm = TRUE),
+            SD = sd(drinks_number_noc, na.rm = TRUE)) %>%
+  knitr::kable(digits = 1, format = "pandoc")
+```
+
+## weekly drinking across condition
 ```{r}
 ema_within %>%
   mutate(week = ifelse(signal_count %in% c(1:14), 1,
@@ -108,28 +172,17 @@ ema_within %>%
 ```
 
 # effectiveness and individual differences: experience sampling intervention analyses (H3-4) {.tabset}
-
-`r emo::ji("check")` H3a: Active intervention weeks will increase participants’ self-reported mindful attention to alcohol 
-
-`r emo::ji("check")` H3b: Mindful attention will be positively associated with decreased alcohol consumption
-
-`r emo::ji("check")` H3c: There will be an indirect effect of intervention-related change in alcohol consumption through greater mindful attention to alcohol
-
-`r emo::ji("check")` H4a: People with stronger signature expression would show greater increases in mindful attention to alcohol on active intervention weeks compared to control weeks
-
-`r emo::ji("check")` H4b: People with stronger signature expression would show more negative relationships between mindful attention to alcohol and alcohol consumption 
-
-```{r}
-prior = c(prior(normal(0, 1), class=b))
-```
-
 ## run model
-```{r, cache = TRUE, include = FALSE}
+```{r, cache = TRUE, echo = TRUE, results = "hide"}
+prior = c(prior(normal(0, 1), class=b))
+
 fm = bf(mindful_response ~ active_week * regulation_expression + (0 + active_week |i| pID)) +
-  bf(drinks_number ~ active_week + regulation_expression * mindful_response + (0 + active_week + mindful_response |i| pID)) +
+  bf(craving_previous ~ active_week * regulation_expression + mindful_response * regulation_expression +(0 + active_week + mindful_response |i| pID)) +
+  bf(drinks_number ~ active_week * regulation_expression + regulation_expression * craving_previous + mindful_response * regulation_expression + 
+       (0 + active_week + craving_previous + mindful_response |i| pID)) +
   set_rescor(FALSE)
           
-fit_brm_m = brm(
+fit_brm_sequential = brm(
   fm,
   data  = ema_within,
   cores = 4,
@@ -142,43 +195,107 @@ fit_brm_m = brm(
 
 ## table
 ```{r}
-fit_brm_m %>%
-  broom.mixed::tidy(conf.int = TRUE) %>%
+fit_brm_sequential %>%
+  broom.mixed::tidy(conf.int = TRUE, conf.level = 0.9) %>%
   filter(effect == "fixed") %>%
   mutate(term = gsub("\\(Intercept\\)", "intercept", term),
          term = gsub("regulation_expression", "signature expression", term),
          term = gsub("active_weekon", "intervention week (active)", term),
          term = gsub("active_weekoff", "intervention week (control)", term),
          term = gsub("mindful_response", "mindful response", term),
-         response = gsub("mindfulscale", "mindful response", response),
+         term = gsub("craving_previous", "craving previous", term),
+         response = gsub("mindfulresponse", "mindful response", response),
+         response = gsub("cravingprevious", "craving previous", response),
          response = gsub("drinksnumber", "number of drinks", response),
          term = gsub(":", " x ", term),
-         `b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high)) %>%
+         `b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high),
+         path = ifelse(grepl("intervention", term) & response == "mindful response", "a1",
+                ifelse(grepl("mindful", term) & response == "craving previous", "b1",
+                ifelse(grepl("craving", term) & response == "number of drinks", "b2",
+                ifelse(grepl("intervention", term) & response == "craving previous", "a2",
+                ifelse(grepl("mindful", term) & response == "number of drinks", "b3",
+                ifelse(grepl("intervention", term) & response == "number of drinks", "c'", ""))))))) %>%
   rename("outcome" = response) %>%
-  select(outcome, term, `b [95% CI]`) %>%
+  select(outcome, path, term, `b [90% CI]`) %>%
   arrange(outcome) %>%
   knitr::kable(digits = 2, format = "pandoc")
 ```
 
-## indirect effect test
+## indirect effect test {.tabset}
+### intervention --> mindful responses --> alcohol consumption
 ```{r}
 hypothesis(
-  fit_brm_m,
-  'b_drinksnumber_mindful_response * b_mindfulresponse_active_weekon + cor_pID__mindfulresponse_active_weekon__drinksnumber_active_weekon * sd_pID__mindfulresponse_active_weekon * sd_pID__drinksnumber_mindful_response = 0',
+  fit_brm_sequential,
+  'b_mindfulresponse_active_weekon * b_drinksnumber_mindful_response +
+  cor_pID__mindfulresponse_active_weekon__drinksnumber_mindful_response *
+  sd_pID__mindfulresponse_active_weekon *
+  sd_pID__drinksnumber_mindful_response
+  = 0',
   class = NULL,
-  seed  =  6523
+  seed  =  6523,
+  alpha = .1
+)
+```
+
+### intervention --> craving --> alcohol consumption
+```{r}
+hypothesis(
+  fit_brm_sequential,
+  'b_cravingprevious_active_weekon * b_drinksnumber_craving_previous +
+  cor_pID__cravingprevious_active_weekon__drinksnumber_craving_previous *
+  sd_pID__cravingprevious_active_weekon *
+  sd_pID__drinksnumber_craving_previous
+  = 0',
+  class = NULL,
+  seed  =  6523,
+  alpha = .1
+)
+```
+
+### intervention --> mindful responses --> craving --> alcohol consumption
+Formula: E(a1,b1,b2) = E(a1)Cov(b1,b2) + E(b1)Cov(a1,b2) + E(b2)Cov(a1,b1) + E(a1)E(b1)E(b2)
+
+```{r}
+hypothesis(
+  fit_brm_sequential,
+  'b_mindfulresponse_active_weekon *
+  cor_pID__cravingprevious_mindful_response__drinksnumber_craving_previous
+  * sd_pID__cravingprevious_mindful_response * sd_pID__drinksnumber_craving_previous +
+  
+  b_cravingprevious_mindful_response *
+  cor_pID__mindfulresponse_active_weekon__drinksnumber_craving_previous *
+  sd_pID__mindfulresponse_active_weekon * sd_pID__drinksnumber_craving_previous +
+  
+  b_drinksnumber_craving_previous *
+  cor_pID__mindfulresponse_active_weekon__cravingprevious_mindful_response *
+  sd_pID__mindfulresponse_active_weekon * sd_pID__cravingprevious_mindful_response +
+  
+  b_mindfulresponse_active_weekon * b_cravingprevious_mindful_response *  b_drinksnumber_craving_previous
+  
+  = 0',
+  class = NULL,
+  seed  =  6523,
+  alpha = .1
 )
 ```
 
 ## summary
 ```{r}
-summary(fit_brm_m)
+summary(fit_brm_sequential, prob = .9)
 ```
 
 ## plots {.tabset}
-### mindful responses by intervention week
+### a1 path: mindful responses ~ intervention week
 ```{r}
+predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("active_week", "regulation_expression [0, 1]"),
+                                 ci.lvl = 0.9) %>%
+  data.frame() %>%
+  mutate(x = recode(x, "on" = "active", "off" = "control"),
+         group = recode(group, "0" = "mean", "1" = "+1 SD"),
+         x = factor(x, levels = c("control", "active")))
+
 slopes_within = ema_within %>%
+  filter(!is.na(active_week)) %>%
   select(pID, active_week, mindful_response) %>%
   rename("x" = active_week,
          "predicted" = mindful_response) %>%
@@ -186,108 +303,105 @@ slopes_within = ema_within %>%
          x = factor(x, levels = c("control", "active"))) %>%
   group_by(pID, x) %>%
   summarize(predicted = mean(predicted, na.rm = TRUE))
-  
-predicted = ggeffects::ggpredict(fit_brm_m, terms = c("active_week", "regulation_expression [0, 1]")) %>%
-  data.frame() %>%
-  mutate(x = recode(x, "on" = "active", "off" = "control"),
-         group = recode(group, "0" = "mean", "1" = "+1 SD"),
-         x = factor(x, levels = c("control", "active")))
 
-(plot_response = predicted %>%
+(plot_a = predicted %>%
   filter(response.level == "mindfulresponse") %>%
   ggplot(aes(x, predicted)) +
-  geom_line(data = slopes_within, aes(x, predicted, group = pID), alpha = .3) +
-  geom_line(aes(group = group, color = group), size = 2, , position = position_dodge(.1)) +
-  geom_pointrange(aes(ymin = conf.low, ymax = conf.high, color = group), size = 2, linewidth = 2, position = position_dodge(.1)) +
+  geom_line(data = slopes_within, aes(x, predicted, group = pID), alpha = .1, size = 1) +
+  geom_line(aes(group = group, color = group), size = 1.5, , position = position_dodge(.1)) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high, color = group), size = 1.5, linewidth = 2, position = position_dodge(.1)) +
   scale_x_discrete(expand = c(.1, .1)) +
+  scale_y_continuous(breaks = c(-1, 0, 1)) +
   scale_color_manual(values = palette, name = "signature expression") +
-  labs(x = "\nintervention week", y = "within-person mindful response (SD)\n") +
+  labs(x = "\nintervention week", y = "within-person mindful response (SD)\n", title = "\na1 path") +
   plot_aes)
 ```
 
-### alchol consumption ~ mindful responses
+### b1 path: craving ~ mindful responses
 ```{r}
-vals = seq(-2,2,.2)
+vals = modelr::seq_range(ema_within$mindful_response, n = 25)
 
-points_within = ema_within %>%
+slopes_within = ema_within %>%
+  select(pID, mindful_response, craving_previous) %>%
+  rename("x" = craving_previous,
+         "predicted" = mindful_response)
+
+predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("mindful_response [vals]", "regulation_expression [0, 1]"),
+                                 ci.lvl = 0.9) %>%
+  data.frame() %>%
+  mutate(group = recode(group, "0" = "mean", "1" = "+1 SD"))
+
+slopes_within = ema_within %>%
+  select(pID, mindful_response, craving_previous) %>%
+  rename("x" = mindful_response,
+         "predicted" = craving_previous)
+
+(plot_b1 = predicted %>%
+  filter(response.level == "cravingprevious") %>%
+  ggplot(aes(x, predicted)) +
+  stat_smooth(data = slopes_within, aes(x, predicted, group = pID), method = "lm", geom ="line", alpha = .1, size = 1, se = FALSE, fullrange = TRUE) +
+  geom_line(aes(group = group, color = group), size = 2) +
+  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .5) +
+  scale_y_continuous(breaks = c(-3, 0, 3, 6)) +
+  scale_color_manual(values = palette, name = "signature expression") +
+  scale_fill_manual(values = palette, name = "signature expression") +
+  labs(x = "\nwithin-person mindful response (SD)", y = "within-person craving (SD)\n", title = "\nb1 path") +
+  plot_aes)
+```
+
+### b2 path: alchol consumption ~ craving
+```{r}
+vals = modelr::seq_range(ema_within$craving_previous, n = 25)
+
+slopes_within = ema_within %>%
+  select(pID, drinks_number, craving_previous) %>%
+  rename("x" = craving_previous,
+         "predicted" = drinks_number)
+
+predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("craving_previous [vals]", "regulation_expression [0, 1]"),
+                                 ci.lvl = 0.9) %>%
+  data.frame() %>%
+  mutate(group = recode(group, "0" = "mean", "1" = "+1 SD"))
+
+(plot_b2 = predicted %>%
+  filter(response.level == "drinksnumber") %>%
+  ggplot(aes(x, predicted)) +
+  stat_smooth(data = slopes_within, aes(x, predicted, group = pID), method = "lm", geom ="line", alpha = .1, size = 1, se = FALSE, fullrange = TRUE) +
+  geom_line(aes(group = group, color = group), size = 2) +
+  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .5) +
+  scale_color_manual(values = palette, name = "signature expression") +
+  scale_fill_manual(values = palette, name = "signature expression") +
+  labs(x = "\nwithin-person craving (SD)", y = "within-person number of drinks\n", title = "\nb2 path") +
+  plot_aes)
+```
+
+### b3 path: alchol consumption ~ mindful responses
+```{r}
+vals = modelr::seq_range(ema_within$mindful_response, n = 25)
+
+slopes_within = ema_within %>%
   select(pID, drinks_number, mindful_response) %>%
   rename("x" = mindful_response,
          "predicted" = drinks_number)
 
-predicted = ggeffects::ggpredict(fit_brm_m, terms = c("mindful_response", "regulation_expression [0, 1]")) %>%
+predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("mindful_response [vals]", "regulation_expression [0, 1]"),
+                                 ci.lvl = 0.9) %>%
   data.frame() %>%
   mutate(group = recode(group, "0" = "mean", "1" = "+1 SD"))
 
-(plot_alcohol = predicted %>%
+(plot_b3 = predicted %>%
   filter(response.level == "drinksnumber") %>%
   ggplot(aes(x, predicted)) +
-  geom_point(data = points_within, alpha = .2, size = 2) +
+  stat_smooth(data = slopes_within, aes(x, predicted, group = pID), method = "lm", geom ="line", alpha = .1, size = 1, se = FALSE, fullrange = TRUE) +
   geom_line(aes(group = group, color = group), size = 2) +
-  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .4) +
+  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .5) +
   scale_color_manual(values = palette, name = "signature expression") +
   scale_fill_manual(values = palette, name = "signature expression") +
-  labs(x = "\nwithin-person mindful response (SD)", y = "within-person number of drinks\n") +
+  labs(x = "\nwithin-person mindful response (SD)", y = "within-person number of drinks\n", title = "\nb3 path") +
   plot_aes)
 ```
 
 ### combined
-```{r, fig.width=11.25, fig.height=5.5}
-ggpubr::ggarrange(plot_response, plot_alcohol, nrow = 1, common.legend = TRUE)
+```{r, fig.width=11.5, fig.height=9}
+ggpubr::ggarrange(plot_a, plot_b1, plot_b2, plot_b3, nrow = 2, ncol = 2, common.legend = TRUE)
 ```
-
-# supplementary analyses {.tabset}
-
-Test craving as the mediator instead of mindful responses to alcohol
-
-## run model
-```{r, cache = TRUE, include = FALSE}
-fm = bf(craving_previous ~ active_week * regulation_expression + (0 + active_week |i| pID)) +
-  bf(drinks_number ~ active_week + regulation_expression * craving_previous + (0 + active_week + craving_previous |i| pID)) +
-  set_rescor(FALSE)
-          
-fit_brm_c = brm(
-  fm,
-  data  = ema_within,
-  cores = 4,
-  thin  = 4,
-  seed  = 6523,
-  control = list(adapt_delta = .99, max_treedepth = 15),
-  prior = prior
-)
-```
-
-## table
-```{r}
-fit_brm_c %>%
-  broom.mixed::tidy(conf.int = TRUE) %>%
-  filter(effect == "fixed") %>%
-  mutate(term = gsub("\\(Intercept\\)", "intercept", term),
-         term = gsub("regulation_expression", "signature expression", term),
-         term = gsub("active_weekon", "intervention week (active)", term),
-         term = gsub("active_weekoff", "intervention week (control)", term),
-         term = gsub("craving_previous", "craving rating", term),
-         response = gsub("cravingprevious", "craving rating", response),
-         response = gsub("drinksnumber", "number of drinks", response),
-         term = gsub(":", " x ", term),
-         `b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high)) %>%
-  rename("outcome" = response) %>%
-  select(outcome, term, `b [95% CI]`) %>%
-  arrange(outcome) %>%
-  knitr::kable(digits = 2, format = "pandoc")
-```
-
-## indirect effect test
-```{r}
-hypothesis(
-  fit_brm_c,
-  'b_drinksnumber_craving_previous * b_cravingprevious_active_weekon + cor_pID__cravingprevious_active_weekon__drinksnumber_active_weekon * sd_pID__cravingprevious_active_weekon * sd_pID__drinksnumber_craving_previous = 0',
-  class = NULL,
-  seed  =  6523
-)
-```
-
-## summary
-```{r}
-summary(fit_brm_c)
-```
-

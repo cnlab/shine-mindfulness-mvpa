@@ -28,7 +28,7 @@ This code cleans the data for the following manuscript:
 # load packages
 ```{r}
 library(pacman)
-pacman::p_load(tidyverse, install = TRUE)
+pacman::p_load(tidyverse, lubridate, install = TRUE)
 ```
 
 # load and tidy data {.tabset}
@@ -104,7 +104,7 @@ classifier_data = read.csv("../data_raw/mvpa/logistic_stats.csv", stringsAsFacto
            actual_factor = as.factor(actual_factor))
 ```
 
-## post-task confience ratings
+## post-task confidence ratings
 ```{r}
 ratings = read.csv("../data_raw/task/post_scan_ratings.csv", stringsAsFactors = FALSE) %>%
   select(DistributionChannel, pID, mindful2) %>%
@@ -116,24 +116,47 @@ ratings = read.csv("../data_raw/task/post_scan_ratings.csv", stringsAsFactors = 
   select(-number, -mindful2, -DistributionChannel)
 ```
 
+## pre-scan trait mindfulness scores on the MAAS
+```{r}
+maas = read.csv("../data_raw/prescan/muri_prescan_scored.csv", stringsAsFactors = FALSE) %>%
+  rename("pID" = SID) %>%
+  mutate(pID = gsub("muric", "sub-MURIC", pID),
+         pID = gsub("muri", "sub-MURIP", pID),
+         MAAS_mean = scale(MAAS_mean, center = TRUE, scale = TRUE)) %>%
+  select(pID, MAAS_mean)
+```
+
 ## EMA data
 ```{r}
-ema = read.csv("../data_raw/ema/cleaned_EMA.csv", stringsAsFactors = FALSE) %>%
-  select(pID, Condition, contains("signal"), Session.Name, active_week, drinks_number, contains("Craving"), contains("React")) %>%
-  rename("condition" = Condition) %>%
-  filter(condition == "mindful") %>%
-  group_by(pID) %>%
-  mutate(condition = gsub("mindful", "mindful attention", condition),
+ema_all = read.csv("../data_raw/ema/SHINE_EMA_May19_2020.csv", stringsAsFactors = FALSE) %>%
+  mutate(shineid = tolower(SHINEID)) %>% #make ids lowercase 
+  filter(!shineid == "muri035") #remove 1ppt with no completion due to technical app difficulties 
+  
+ema = ema_all %>%
+  filter(Condition == "mindful") %>% # subset participants in the mindfulness condition
+  select(shineid, Notification.Time, contains("signal"), Session.Name, HadAlcohol, contains("Num_"), contains("Craving"), Alc_React_Mindful, -Num_Caffeine, -Num_Water) %>%
+  filter(!is.na(Notification.Time)) %>%
+  mutate(pID = shineid,
          pID = gsub("muric", "sub-MURIC", pID),
          pID = gsub("muri", "sub-MURIP", pID),
-         active_week = gsub("active", "on", active_week),
-         active_week = gsub("control", "off", active_week),
-         drinks_number_noc = drinks_number,
-         drinks_number = scale(drinks_number, center = TRUE, scale = FALSE),
-         mindful_response = scale(Alc_React_Mindful, center = TRUE, scale = TRUE),
-         craving_previous = lag(Craving_Alc),
-         craving_previous = scale(craving_previous, center = TRUE, scale = TRUE),
-         craving = scale(Craving_Alc, center = TRUE, scale = TRUE))
+         active_week = ifelse(grepl("PROMPTA", Session.Name), "off",
+                        ifelse(grepl("PROMPTB|PROMPTC", Session.Name), "on", NA)),
+         Notification.Time = mdy_hm(Notification.Time)) %>% 
+  extract(Notification.Time, "date", "(.*) .*", remove = FALSE) %>%
+  group_by(pID) %>%
+  fill(active_week, .direction = "down") %>% #by grouping by participant and filling down, this removes the first morning reports and codes the first morning of switch (e.g., off --> on) as the previous condition because they alcohol report (and lagged craving) are from the previous night
+  arrange(pID, Notification.Time) %>%
+  group_by(pID) %>%
+  mutate(craving_previous = lag(Craving_Alc)) %>% #lag craving before selecting signals with alcohol prompts 
+  filter(grepl("Morning|Evening", Session.Name)) %>% #select only alcohol prompts
+  mutate(drinks_number_noc = ifelse(HadAlcohol == 1, Num_Beer + Num_Wine + Num_Liquor, #sum drinks if HadAlcohol = 1
+                                    ifelse(HadAlcohol == 0, 0, NA)),
+         drinks_number = scale(drinks_number_noc, center = TRUE, scale = FALSE), #center within-person but don't scale to keep interpretable unites
+         mindful_response = scale(Alc_React_Mindful, center = TRUE, scale = TRUE), #center and scale within-person
+         craving = scale(Craving_Alc, center = TRUE, scale = TRUE), #center and scale within-person
+         craving_previous = scale(craving_previous, center = TRUE, scale = TRUE), #center and scale within-person
+         signal_count = row_number()) %>% 
+  select(pID, Notification.Time, date, Session.Name, signal_count, everything(), -shineid)
 ```
 
 ## merge and prep for modeling
@@ -181,6 +204,7 @@ write.csv(merged, "../data/task_neuro_data.csv", row.names = FALSE)
 write.csv(disaggregated, "../data/disaggregated_data.csv", row.names = FALSE)
 write.csv(classifier_data, "../data/classifier_data.csv", row.names = FALSE)
 write.csv(ratings, "../data/ratings.csv", row.names = FALSE)
+write.csv(maas, "../data/MAAS.csv", row.names = FALSE)
 write.csv(ema, "../data/ema.csv", row.names = FALSE)
 ```
 
