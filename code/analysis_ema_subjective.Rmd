@@ -1,0 +1,200 @@
+---
+title: "EMA intervention sensitivity analyses"
+author: ""
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    theme: united
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, dpi = 300,
+                      colormodel = "cmyk", fig.width=7, fig.height=5)
+options(scipen = 999)
+```
+
+This code reproduces the EMA intervention sensitivity analyses reported in the following manuscript:
+
+[Using neural signatures to predict health behavior change: A mindful distancing intervention to reduce alcohol consumption as a proof of concept]()
+
+# load packages
+```{r}
+library(pacman)
+pacman::p_load(tidyverse, brms, ggeffects, kableExtra, tidybayes, install = TRUE)
+```
+
+# define aesthetics
+```{r}
+palette = c("#e64626", "#1985a1", "#4c5c68", "#FAC748")
+
+plot_aes = theme_minimal() +
+  theme(legend.position = "top",
+        legend.text = element_text(size = 16),
+        plot.title = element_text(hjust = 0.5),
+        text = element_text(size = 18, family = "Futura Medium"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text = element_text(color = "black"),
+        axis.line = element_line(colour = "black"),
+        axis.ticks.y = element_blank())
+```
+
+# load data
+```{r}
+merged = read.csv("../data/task_neuro_data.csv", stringsAsFactors = FALSE)
+ema = read.csv("../data/ema.csv")
+maas = read.csv("../data/MAAS.csv", stringsAsFactors = FALSE)
+ratings = read.csv("../data/ratings.csv", stringsAsFactors = FALSE)
+```
+
+## merge and prep for modeling
+```{r}
+between = merged %>%
+  filter(condition == "mindful distancing") %>%
+  select(pID, dot, trial_cond, condition) %>%
+  group_by(pID, trial_cond, condition) %>%
+  summarize(dot_between = mean(dot, na.rm = TRUE)) %>%
+  group_by(trial_cond) %>%
+  mutate(dot_between_c = scale(dot_between, scale = FALSE, center = TRUE)) %>%
+  mutate(sd_dot = sd(dot_between, na.rm = TRUE),
+         dot_between_std = dot_between_c / sd_dot) %>%
+  select(pID, condition, trial_cond, dot_between_std) %>%
+  mutate(trial_cond = sprintf("%s_expression", trial_cond)) %>%
+  spread(trial_cond, dot_between_std)
+
+ema_within = ema %>%
+  left_join(., between) %>%
+  left_join(., maas) %>%
+  left_join(., ratings)
+```
+
+# effectiveness and individual differences: experience sampling intervention analyses (H3-4) {.tabset}
+## run model
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
+prior = c(prior(normal(0, 1), class=b))
+
+fm = bf(mindful_response ~ active_week * regulation_expression + 
+                           active_week * confidence_rating + 
+                           active_week * MAAS_mean + 
+          (0 + active_week |i| pID)) +
+  bf(craving_previous ~ active_week * regulation_expression + mindful_response * regulation_expression + 
+                        active_week * confidence_rating + mindful_response * confidence_rating + 
+                        active_week * MAAS_mean + mindful_response * MAAS_mean + 
+       (0 + active_week + mindful_response |i| pID)) +
+  bf(drinks_number ~ active_week * regulation_expression + regulation_expression * craving_previous + mindful_response * regulation_expression  + 
+                     active_week * confidence_rating + confidence_rating * craving_previous + mindful_response * confidence_rating  + 
+                     active_week * MAAS_mean + MAAS_mean * craving_previous + mindful_response * MAAS_mean  + 
+       (0 + active_week + craving_previous + mindful_response |i| pID)) +
+  set_rescor(FALSE)
+          
+fit_brm_sequential = brm(
+  fm,
+  data  = ema_within,
+  cores = 4,
+  thin  = 4,
+  seed  = 6523,
+  control = list(adapt_delta = .99, max_treedepth = 15),
+  prior = prior
+)
+```
+
+## table
+```{r}
+fit_brm_sequential %>%
+  broom.mixed::tidy(conf.int = TRUE, conf.level = 0.95) %>%
+  filter(effect == "fixed") %>%
+  mutate(term = gsub("\\(Intercept\\)", "intercept", term),
+         term = gsub("regulation_expression", "signature expression", term),
+         term = gsub("active_weekon", "intervention week (active)", term),
+         term = gsub("active_weekoff", "intervention week (control)", term),
+         term = gsub("mindful_response", "mindful response", term),
+         term = gsub("craving_previous", "craving previous", term),
+         response = gsub("mindfulresponse", "mindful response", response),
+         response = gsub("cravingprevious", "craving previous", response),
+         response = gsub("drinksnumber", "number of drinks", response),
+         term = gsub(":", " x ", term),
+         `b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high),
+         path = ifelse(grepl("intervention", term) & response == "mindful response", "a1",
+                ifelse(grepl("mindful", term) & response == "craving previous", "b1",
+                ifelse(grepl("craving", term) & response == "number of drinks", "b2",
+                ifelse(grepl("intervention", term) & response == "craving previous", "a2",
+                ifelse(grepl("mindful", term) & response == "number of drinks", "b3",
+                ifelse(grepl("intervention", term) & response == "number of drinks", "c'", ""))))))) %>%
+  rename("outcome" = response) %>%
+  select(outcome, path, term, `b [95% CI]`) %>%
+  mutate(outcome = factor(outcome, levels = c("mindful response", "craving previous", "number of drinks"))) %>%
+  arrange(outcome, path) %>%
+  knitr::kable(digits = 2, format = "pandoc")
+```
+
+## indirect effect test {.tabset}
+### intervention --> mindful responses --> alcohol consumption
+```{r}
+hypothesis(
+  fit_brm_sequential,
+  'b_mindfulresponse_active_weekon * b_drinksnumber_mindful_response +
+  cor_pID__mindfulresponse_active_weekon__drinksnumber_mindful_response *
+  sd_pID__mindfulresponse_active_weekon *
+  sd_pID__drinksnumber_mindful_response
+  = 0',
+  class = NULL,
+  seed  =  6523,
+  alpha = .05
+)
+```
+
+### intervention --> craving --> alcohol consumption
+```{r}
+hypothesis(
+  fit_brm_sequential,
+  'b_cravingprevious_active_weekon * b_drinksnumber_craving_previous +
+  cor_pID__cravingprevious_active_weekon__drinksnumber_craving_previous *
+  sd_pID__cravingprevious_active_weekon *
+  sd_pID__drinksnumber_craving_previous
+  = 0',
+  class = NULL,
+  seed  =  6523,
+  alpha = .05
+)
+```
+
+### intervention --> mindful responses --> craving --> alcohol consumption
+Formula: E(a1,b1,b2) = E(a1)Cov(b1,b2) + E(b1)Cov(a1,b2) + E(b2)Cov(a1,b1) + E(a1)E(b1)E(b2)
+
+```{r}
+hypothesis(
+  fit_brm_sequential,
+  'b_mindfulresponse_active_weekon *
+  cor_pID__cravingprevious_mindful_response__drinksnumber_craving_previous
+  * sd_pID__cravingprevious_mindful_response * sd_pID__drinksnumber_craving_previous +
+  
+  b_cravingprevious_mindful_response *
+  cor_pID__mindfulresponse_active_weekon__drinksnumber_craving_previous *
+  sd_pID__mindfulresponse_active_weekon * sd_pID__drinksnumber_craving_previous +
+  
+  b_drinksnumber_craving_previous *
+  cor_pID__mindfulresponse_active_weekon__cravingprevious_mindful_response *
+  sd_pID__mindfulresponse_active_weekon * sd_pID__cravingprevious_mindful_response +
+  
+  b_mindfulresponse_active_weekon * b_cravingprevious_mindful_response *  b_drinksnumber_craving_previous
+  
+  = 0',
+  class = NULL,
+  seed  =  6523,
+  alpha = .05
+)
+```
+
+## summary
+```{r}
+summary(fit_brm_sequential, prob = .95)
+```

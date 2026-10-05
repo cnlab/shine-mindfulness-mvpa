@@ -21,6 +21,11 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 options(scipen = 999)
 ```
 
+This code reproduces the MVPA holdout sample analyses reported in the following manuscript:
+
+[Using neural signatures to predict health behavior change: A mindful distancing intervention to reduce alcohol consumption as a proof of concept]()
+
+
 # load packages
 ```{r}
 library(pacman)

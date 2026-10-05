@@ -23,7 +23,7 @@ options(scipen = 999)
 
 This code reproduces the fMRI analyses reported in the following manuscript:
 
-[Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
+[Using neural signatures to predict health behavior change: A mindful distancing intervention to reduce alcohol consumption as a proof of concept]()
 
 # load packages
 ```{r}
@@ -53,21 +53,21 @@ plot_aes = theme_minimal() +
 ```{r}
 make_table = function(data) {
     data %>%
-      broom.mixed::tidy(conf.int = TRUE, conf.level = 0.9) %>%
+      broom.mixed::tidy(conf.int = TRUE, conf.level = 0.95) %>%
       filter(effect == "fixed") %>%
       mutate(term = gsub("\\(Intercept\\)", "intercept", term),
-             term = gsub("trial_condregulation", "task condition (mindful attention)", term),
-             term = gsub("trial_cond_recode", "task condition (mindful attention)", term),
-             term = gsub("trial_condmindfulattention", "task condition (mindful attention)", term),
-             term = gsub("dot_between_std_noc", "signature expression (between)", term),
+             term = gsub("trial_condregulation", "task condition (mindful distancing)", term),
+             term = gsub("trial_cond_recode", "task condition (mindful distancing)", term),
+             term = gsub("trial_condmindfuldistancing", "task condition (mindful distancing)", term),
+             term = gsub("dot_between_std", "signature expression (between)", term),
              term = gsub("dot_within_std", "signature expression (within)", term),
              term = gsub("dot_sd", "signature expression variability", term),
              term = gsub("regulation_expression", "signature expression", term),
              term = gsub("confidence_rating", "confidence rating", term),
              term = gsub("MAAS_mean", "MAAS score", term),
              term = gsub(":", " x  ", term),
-             `b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high),) %>%
-      select(term, `b [90% CI]`) %>%
+             `b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high),) %>%
+      select(term, `b [95% CI]`) %>%
       knitr::kable(digits = 2)
 }
 ```
@@ -82,10 +82,10 @@ maas = read.csv("../data/MAAS.csv", stringsAsFactors = FALSE)
 merged = read.csv("../data/task_neuro_data.csv", stringsAsFactors = FALSE)
 disaggregated = read.csv("../data/disaggregated_data.csv", stringsAsFactors = FALSE)
 disaggregated_mindful = disaggregated %>%
-  filter(condition == "mindful attention")
+  filter(condition == "mindful distancing")
 ```
 
-# mindful attention signature development analyses {.tabset}
+# mindful distancing signature development analyses {.tabset}
 
 Here is the weight map from the MVPA analyses:
 
@@ -94,22 +94,22 @@ Here is the weight map from the MVPA analyses:
 
 ## cross-validation accuracy {.tabset}
 
-`r emo::ji("check")` We expect that we will be able to train a classifier at the run level to distinguish mindful attention from uninstructed reactivity to alcohol cues with greater than chance accuracy decoding.
+`r emo::ji("check")` We expect that we will be able to train a classifier at the run level to distinguish mindful distancing from uninstructed reactivity to alcohol cues with greater than chance accuracy decoding.
 
 ```{r}
 caret::confusionMatrix(classifier_data$predicted_factor, classifier_data$actual_factor)
 ```
 
 ## trial-level accuracy {.tabset}
-`r emo::ji("check")` Given that the classifier is developed at the run level, we will also confirm that the expression of the mindful attention signature is evident at the trial-level. That is, we expect the signature expression to be higher during mindful attention trials compared to reactivity trials.
+`r emo::ji("check")` Given that the classifier is developed at the run level, we will also confirm that the expression of the mindful distancing signature is evident at the trial-level. That is, we expect the signature expression to be higher during mindful distancing trials compared to reactivity trials.
 
 ### means {.tabset}
 #### plot
 ```{r, fig.width=5, fig.height=4.5}
 data_means = merged %>%
-  filter(condition == "mindful attention") %>%
-  mutate(trial_cond = gsub("regulation", "mindful attention", trial_cond),
-         trial_cond = factor(trial_cond, levels = c("reactivity", "mindful attention")),
+  filter(condition == "mindful distancing") %>%
+  mutate(trial_cond = gsub("regulation", "mindful distancing", trial_cond),
+         trial_cond = factor(trial_cond, levels = c("reactivity", "mindful distancing")),
          dot_std = scale(dot, center = TRUE, scale = TRUE))
 
 data_means %>%
@@ -124,13 +124,14 @@ data_means %>%
 ```
 
 #### run model
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
 prior = c(prior(normal(0, 1), class=b))
 
 mod_means = brms::brm(dot_std ~ trial_cond + (1 + trial_cond | pID),
                       data = data_means, 
                       prior = prior,
-                      cores = 8, iter = 1000, silent = TRUE, seed = 6523)
+                      control = list(adapt_delta = .9),
+                      cores = 8, iter = 2000, silent = TRUE, seed = 6523)
 ```
 
 #### table
@@ -140,7 +141,7 @@ make_table(mod_means)
 
 #### summary
 ```{r}
-summary(mod_means, prob = .9)
+summary(mod_means, prob = .95)
 ```
 
 ### ROC plot
@@ -149,7 +150,7 @@ acc_line1 = data.frame(x = c(0, 1), y = c(1, 1))
 acc_line2 = data.frame(y = c(0, 1), x = c(0, 0))
 
 merged %>%
-  filter(condition %in% c("mindful attention")) %>%
+  filter(condition %in% c("mindful distancing")) %>%
   filter(!is.na(dot)) %>%
   mutate(actual = ifelse(trial_cond == "regulation", 1, 0)) %>%
   group_by(condition) %>%
@@ -176,7 +177,7 @@ merged %>%
 ### confusion matrix
 ```{r}
 conf_data = merged %>%
-  filter(condition == "mindful attention") %>%
+  filter(condition == "mindful distancing") %>%
   filter(!is.na(dot)) %>%
   mutate(predicted = ifelse(dot > 0, "regulation",
                      ifelse(dot < 0, "reactivity", NA)),
@@ -187,7 +188,8 @@ caret::confusionMatrix(conf_data$predicted, conf_data$trial_cond)
 ```
 
 # descriptive statistics
-## craving
+## craving {.tabset}
+### stats
 ```{r}
 disaggregated_mindful %>%
   group_by(trial_cond) %>%
@@ -196,18 +198,38 @@ disaggregated_mindful %>%
   knitr::kable(digits = 1, format = "pandoc")
 ```
 
+### visualize {.tabset}
+#### across participants
+```{r}
+disaggregated_mindful %>%
+  ggplot(aes(resp, fill = trial_cond)) +
+  geom_bar(position = position_dodge()) +
+  scale_fill_manual(values = palette) +
+  plot_aes
+```
+
+#### by participant
+```{r, fig.width=12, fig.height=10}
+disaggregated_mindful %>%
+  ggplot(aes(resp, fill = trial_cond)) +
+  geom_bar(position = position_dodge()) +
+  facet_wrap(~pID) +
+  scale_fill_manual(values = palette) +
+  plot_aes
+```
+
 # efficacy: trial-level craving analyses {.tabset}
 ## H1 {.tabset}
 
-`r emo::ji("check")` Compared to reactivity trials, mindful attention trials will be associated with decreased craving 
+`r emo::ji("check")` Compared to reactivity trials, mindful distancing trials will be associated with decreased craving 
 
 ### run model
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
-mod_behavior = brms::brm(resp ~ 1 + trial_cond +
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
+mod_behavior = brms::brm(resp_std ~ 1 + trial_cond +
                 (1 + trial_cond | pID) + (1 | stimulus),
-                disaggregated_mindful, 
+                disaggregated_mindful,
                 prior = prior,
-                cores = 8, iter = 1000, silent = TRUE, seed = 6523)
+                cores = 8, iter = 2000, silent = TRUE, seed = 6523)
 ```
 
 ### plot
@@ -221,7 +243,6 @@ mod_behavior %>%
   stat_halfeye(alpha = .5) +
   scale_fill_manual(values = c(palette[2], palette[1])) +
   scale_y_discrete(expand = c(.1, .1)) +
-  coord_cartesian(xlim = c(1.5, 2.5)) +
   labs(x = "\npredicted craving rating\n", y = "") + 
   plot_aes
 ```
@@ -233,7 +254,7 @@ make_table(mod_behavior)
 
 ### summary
 ```{r}
-summary(mod_behavior, prob = .9)
+summary(mod_behavior, prob = .95)
 ```
 
 ### ICC {.tabset}
@@ -249,53 +270,61 @@ performance::variance_decomposition(mod_behavior, re_formula = ~ (1 | stimulus))
 
 ## H2 {.tabset}
 
-`r emo::ji("check")` A: We expect that people who have greater expression of the mindful attention signature on average (i.e., L2, between-person expression) will also have lower craving ratings on a trial-by-trial basis.
+`r emo::ji("check")` A: We expect that people who have greater expression of the mindful distancing signature on average (i.e., L2, between-person expression) will also have lower craving ratings on a trial-by-trial basis.
 
-`r emo::ji("x")` B: We expect that trials with greater expression of the mindful attention signature compared to one’s average (i.e., L1, within-person expression) will be associated with lower craving ratings on a trial-by-trial basis.
+`r emo::ji("x")` B: We expect that trials with greater expression of the mindful distancing signature compared to one’s average (i.e., L1, within-person expression) will be associated with lower craving ratings on a trial-by-trial basis.
 
 ### run model {.tabset}
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
-mod_h2_int = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
+mod_h2_int = brms::brm(resp_std ~ 1 + trial_cond * dot_between_std +
                          trial_cond * dot_within_std +
                          (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),
-                disaggregated_mindful, 
+                disaggregated_mindful,
                 prior = prior,
-                cores = 8, iter = 1000, silent = TRUE, seed = 6523)
+                cores = 8, iter = 2000, silent = TRUE, seed = 6523)
 ```
 
 ### plots {.tabset}
 #### between-person {.tabset}
 ```{r, fig.width=7, fig.height=5.5}
 points_between = disaggregated_mindful %>%
-  select(pID, resp, trial_cond, dot_between_std_noc) %>%
-  group_by(pID, trial_cond, dot_between_std_noc) %>%
-  summarize(resp = mean(resp, na.rm = TRUE)) %>%
-  mutate(group = ifelse(trial_cond == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")),
+  select(pID, resp_std, trial_cond, dot_between_std) %>%
+  group_by(pID, trial_cond, dot_between_std) %>%
+  summarize(resp_std = mean(resp_std, na.rm = TRUE)) %>%
+  mutate(group = ifelse(trial_cond == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")),
          type = "between-person") %>%
-  rename("x" = dot_between_std_noc,
-         "predicted" = resp)
+  rename("x" = dot_between_std) %>%
+  ungroup() %>%
+  select(pID, x, group)
 
 vals = modelr::seq_range(points_between$x, n = 25)
 
-predicted = ggeffects::ggpredict(mod_h2_int, c("dot_between_std_noc [vals]", "trial_cond"), 
-                                 ci.lvl = 0.9) %>%
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("pID", "trial_cond"), type = "random") %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing"))) %>%
+  rename("pID" = x) %>%
+  left_join(., points_between)
+
+predicted = ggeffects::ggpredict(mod_h2_int, c("dot_between_std [vals]", "trial_cond"), 
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
   mutate(type = "between-person") %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")))
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
 
 (between = predicted %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
-  geom_point(data = points_between, alpha = .4, size = 2) +
-  geom_line(data = points_between, aes(group = pID), alpha = .4, size = 1.25, color = "grey") +
+  geom_point(data = predicted_sub, alpha = .4, size = 2) +
+  geom_line(data = predicted_sub, aes(group = pID), alpha = .4, size = 1.25, color = "grey") +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
   geom_line(size = 2) +
   scale_fill_manual(name = "trial type", values = palette) +
   scale_color_manual(name = "trial type", values = palette) +
-  scale_y_continuous(breaks = c(1,2,3)) +
-  labs(x = expression("\nreactivity " * symbol('\254') * " signature expression " * symbol('\256') * " mindful attention"),
-       y = "craving rating\n",
+  scale_y_continuous(breaks = c(-1,0,1)) +
+  labs(x = "between-person signature expression (SD)",
+       y = "craving rating (SD)\n",
        title = "between-person") +
   plot_aes +
   theme(legend.position = "top"))
@@ -303,31 +332,31 @@ predicted = ggeffects::ggpredict(mod_h2_int, c("dot_between_std_noc [vals]", "tr
 
 #### within-person
 ```{r, fig.width=7, fig.height=5.5}
-points_within = disaggregated_mindful %>%
-  select(pID, resp, trial_cond, dot_within_std) %>%
-  mutate(group = ifelse(trial_cond == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")),
-         type = "within-person") %>%
-  rename("x" = dot_within_std,
-         "predicted" = resp)
+vals = modelr::seq_range(disaggregated_mindful$dot_within_std, n = 25)
 
-vals = modelr::seq_range(points_within$x, n = 25)
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("dot_within_std [vals]", "trial_cond", "pID"), type = "random") %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
 
 predicted = ggeffects::ggpredict(mod_h2_int, c("dot_within_std [vals]", "trial_cond"),
-                                 ci.lvl = 0.9) %>%
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")))
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
 
 (within = predicted %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
-  stat_smooth(data = points_within, aes(group = interaction(pID, group)), geom = "line", method = "lm", alpha = 0.15, se = FALSE, size = 1.25, fullrange = TRUE) + 
+  stat_smooth(data = predicted_sub, aes(group = interaction(facet, group)), 
+              geom = "line", method = "lm", alpha = 0.15, se = FALSE, size = 1.25, fullrange = TRUE) + 
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .3, color = NA) + 
   geom_line(size = 2) +
   scale_fill_manual(name = "trial type", values = palette) +
   scale_color_manual(name = "trial type", values = palette) +
+  scale_y_continuous(breaks = c(-1,0,1)) +
+  scale_x_continuous(breaks = c(-4,-2,0,2,4)) +
   labs(x = "within-person signature expression (SD)",
-       y = "craving rating\n",
+       y = "craving rating (SD)\n",
        title = "within-person") +
   plot_aes +
   theme(legend.position = "top"))
@@ -345,24 +374,24 @@ make_table(mod_h2_int)
 
 ### simple slopes
 ```{r}
-emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_between_std_noc", level = 0.9) %>%
+emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_between_std", level = 0.95) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std_noc.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 
-emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_within_std", level = 0.9) %>%
+emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_within_std", level = 0.95) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 ```
 
 ### summary
 ```{r}
-summary(mod_h2_int, prob = .9)
+summary(mod_h2_int, prob = .95)
 ```
 
 ### ICC {.tabset}
@@ -377,8 +406,8 @@ performance::variance_decomposition(mod_h2_int, re_formula = ~ (1 | stimulus))
 ```
 
 # sensitivity analyses
-## mindful signature attention: discriminant validity {.tabset}
-> To examine discriminant validity, we will apply the mindful attention signature to data from a separate group of participants who were instructed to use a different form of cognitive regulation (i.e., not mindful attention) that is not expected to rely on the same brain regions. We expect lower than chance accuracy decoding alcohol regulation versus reactivity trials.
+## mindful signature distancing: discriminant validity {.tabset}
+> To examine discriminant validity, we will apply the mindful distancing signature to data from a separate group of participants who were instructed to use a different form of cognitive regulation (i.e., not mindful distancing) that is not expected to rely on the same brain regions. We expect lower than chance accuracy decoding alcohol regulation versus reactivity trials.
 
 ### ROC plot
 ```{r, fig.width=7, fig.height=6.5}
@@ -386,7 +415,7 @@ acc_line1 = data.frame(x = c(0, 1), y = c(1, 1))
 acc_line2 = data.frame(y = c(0, 1), x = c(0, 0))
 
 merged %>%
-  filter(condition %in% c("perspective-taking", "mindful attention")) %>%
+  filter(condition %in% c("perspective-taking", "mindful distancing")) %>%
   filter(!is.na(dot)) %>%
   mutate(actual = ifelse(trial_cond == "regulation", 1, 0)) %>%
   group_by(condition) %>%
@@ -423,6 +452,216 @@ conf_data = merged %>%
 caret::confusionMatrix(conf_data$predicted, conf_data$trial_cond)
 ```
 
+## excluding participants who don't crave alcohol {.tabset}
+> Trial-level craving analyses among participants who rated > 1 reactivity trial as craved (rating > 3)
+
+```{r, fig.width=12, fig.height=10}
+pids_craved = disaggregated_mindful %>%
+  filter(trial_cond == "reactivity") %>%
+  mutate(resp_bin = ifelse(resp > 3, "craved", "not craved")) %>%
+  group_by(pID, resp_bin) %>%
+  summarize(n = n()) %>%
+  group_by(pID) %>%
+  mutate(percent = round((n / sum(n)) * 100, 1)) %>%
+  filter(resp_bin == "craved") %>%
+  arrange(desc(percent)) %>%
+  filter(n > 1)
+
+disaggregated_mindful %>%
+  filter(trial_cond == "reactivity") %>%
+  mutate(included = ifelse(pID %in% pids_craved$pID, "yes", "no")) %>%
+  ggplot(aes(resp, fill = trial_cond, alpha = included)) +
+  geom_bar(position = position_dodge()) +
+  facet_wrap(~pID) +
+  scale_fill_manual(values = palette, guide = FALSE) +
+  labs(x = "craving rating") +
+  plot_aes
+```
+
+### H1 {.tabset}
+
+`r emo::ji("check")` Compared to reactivity trials, mindful distancing trials will be associated with decreased craving 
+
+#### run model
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
+mod_behavior = brms::brm(resp_std ~ 1 + trial_cond +
+                (1 + trial_cond | pID) + (1 | stimulus),
+                filter(disaggregated_mindful, pID %in% pids_craved$pID),
+                prior = prior,
+                cores = 8, iter = 2000, silent = TRUE, seed = 6523)
+```
+
+#### plot
+```{r, fig.width=6, fig.height=5}
+mod_behavior %>%
+  spread_draws(b_Intercept, b_trial_condregulation) %>%
+  mutate(reactivity = b_Intercept,
+         mindfulness = b_Intercept + b_trial_condregulation) %>%
+  gather(`trial type`, value, reactivity, mindfulness) %>%
+  ggplot(aes(y = "", x = value, fill = `trial type`)) +
+  stat_halfeye(alpha = .5) +
+  scale_fill_manual(values = c(palette[2], palette[1])) +
+  scale_y_discrete(expand = c(.1, .1)) +
+  coord_cartesian(xlim = c(1, 5)) +
+  labs(x = "\npredicted craving rating\n", y = "") + 
+  plot_aes
+```
+
+#### table
+```{r}
+make_table(mod_behavior)
+```
+
+#### summary
+```{r}
+summary(mod_behavior, prob = .95)
+```
+
+#### ICC {.tabset}
+##### participant
+```{r}
+performance::variance_decomposition(mod_behavior, re_formula = ~ (1 + trial_cond | pID))
+```
+
+##### stimulus
+```{r}
+performance::variance_decomposition(mod_behavior, re_formula = ~ (1 | stimulus))
+```
+
+### H2 {.tabset}
+
+`r emo::ji("check")` A: We expect that people who have greater expression of the mindful distancing signature on average (i.e., L2, between-person expression) will also have lower craving ratings on a trial-by-trial basis.
+
+`r emo::ji("x")` B: We expect that trials with greater expression of the mindful distancing signature compared to one’s average (i.e., L1, within-person expression) will be associated with lower craving ratings on a trial-by-trial basis.
+
+#### run model {.tabset}
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
+mod_h2_int = brms::brm(resp_std ~ 1 + trial_cond * dot_between_std +
+                         trial_cond * dot_within_std +
+                         (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),
+                filter(disaggregated_mindful, pID %in% pids_craved$pID),
+                prior = prior,
+                cores = 8, iter = 2000, silent = TRUE, seed = 6523)
+```
+
+#### plots {.tabset}
+##### between-person {.tabset}
+```{r, fig.width=7, fig.height=5.5}
+points_between = disaggregated_mindful %>%
+  select(pID, resp_std, trial_cond, dot_between_std) %>%
+  group_by(pID, trial_cond, dot_between_std) %>%
+  summarize(resp_std = mean(resp_std, na.rm = TRUE)) %>%
+  mutate(group = ifelse(trial_cond == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")),
+         type = "between-person") %>%
+  rename("x" = dot_between_std) %>%
+  ungroup() %>%
+  select(pID, x, group)
+
+vals = modelr::seq_range(points_between$x, n = 25)
+
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("pID", "trial_cond"), type = "random") %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing"))) %>%
+  rename("pID" = x) %>%
+  left_join(., points_between)
+
+predicted = ggeffects::ggpredict(mod_h2_int, c("dot_between_std [vals]", "trial_cond"), 
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
+  mutate(type = "between-person") %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
+
+(between = predicted %>%
+  ggplot(aes(x, predicted, color = group, fill = group)) +
+  geom_point(data = predicted_sub, alpha = .4, size = 2) +
+  geom_line(data = predicted_sub, aes(group = pID), alpha = .4, size = 1.25, color = "grey") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
+  geom_line(size = 2) +
+  scale_fill_manual(name = "trial type", values = palette) +
+  scale_color_manual(name = "trial type", values = palette) +
+  scale_y_continuous(breaks = c(1,2,3)) +
+  labs(x = "between-person signature expression (SD)",
+       y = "craving rating (SD)\n",
+       title = "between-person") +
+  plot_aes +
+  theme(legend.position = "top"))
+```
+
+##### within-person
+```{r, fig.width=7, fig.height=5.5}
+vals = modelr::seq_range(disaggregated_mindful$dot_within_std, n = 25)
+
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("dot_within_std [vals]", "trial_cond", "pID"), type = "random") %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
+
+predicted = ggeffects::ggpredict(mod_h2_int, c("dot_within_std [vals]", "trial_cond"),
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
+
+(within = predicted %>%
+  ggplot(aes(x, predicted, color = group, fill = group)) +
+  stat_smooth(data = predicted_sub, aes(group = interaction(facet, group)), geom = "line", method = "lm", alpha = 0.15, se = FALSE, size = 1.25, fullrange = TRUE) + 
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .3, color = NA) + 
+  geom_line(size = 2) +
+  scale_fill_manual(name = "trial type", values = palette) +
+  scale_color_manual(name = "trial type", values = palette) +
+  labs(x = "within-person signature expression (SD)",
+       y = "craving rating (SD)\n",
+       title = "within-person") +
+  plot_aes +
+  theme(legend.position = "top"))
+```
+
+##### combined
+```{r, fig.width=12.25, fig.height=5}
+ggpubr::ggarrange(between, within, nrow = 1, common.legend = TRUE)
+```
+
+#### table
+```{r}
+make_table(mod_h2_int)
+```
+
+#### simple slopes
+```{r}
+emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_between_std", level = 0.95) %>%
+    data.frame() %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
+      knitr::kable()
+
+emmeans::emtrends(mod_h2_int, ~ trial_cond, var="dot_within_std", level = 0.95) %>%
+    data.frame() %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
+      knitr::kable()
+```
+
+#### summary
+```{r}
+summary(mod_h2_int, prob = .95)
+```
+
+#### ICC {.tabset}
+##### participant
+```{r}
+performance::variance_decomposition(mod_h2_int, re_formula = ~ (1 + trial_cond * dot_within_std | pID))
+```
+
+##### stimulus
+```{r}
+performance::variance_decomposition(mod_h2_int, re_formula = ~ (1 | stimulus))
+```
+
 ## confidence rating analyses {.tabset}
 ```{r}
 merged_ratings = disaggregated_mindful %>%
@@ -445,20 +684,20 @@ cor.test(corr_data$confidence_rating, corr_data$dot_between)
 > We examined the degree to which confidence ratings were associated with neural signature expression
 
 #### run model
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
 mod_ph_expression = brms::brm(dot ~ confidence_rating * trial_cond + (1 + trial_cond | pID),
                            data = merged_ratings,
                            prior = prior,
-                           cores = 8, iter = 1000, silent = TRUE, seed = 6523)
+                           cores = 8, iter = 2000, silent = TRUE, seed = 6523)
 ```
 
 #### plot
 ```{r}
 ggeffects::ggpredict(mod_ph_expression, terms = c("confidence_rating", "trial_cond"),
-                     ci.lvl = 0.9) %>%
+                     ci.lvl = 0.95) %>%
   data.frame() %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention"))) %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing"))) %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
   geom_line(size = 2) +
@@ -477,99 +716,106 @@ make_table(mod_ph_expression)
 
 #### simple slopes
 ```{r}
-emmeans::emtrends(mod_ph_expression, ~ trial_cond, var="confidence_rating", level = .9) %>%
+emmeans::emtrends(mod_ph_expression, ~ trial_cond, var="confidence_rating", level = .95) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", confidence_rating.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", confidence_rating.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 ```
 
 #### summary
 ```{r}
-summary(mod_ph_expression, prob = .9)
+summary(mod_ph_expression, prob = .95)
 ```
 
 ### H2 controlling for confidence ratings {.tabset}
 > We examined the degree to which controlling for confidence ratings affected the results for H2
 
 #### run model {.tabset}
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
-mod_ph_h2 = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
+mod_ph_h2 = brms::brm(resp_std ~ 1 + trial_cond * dot_between_std +
                         trial_cond * dot_within_std +
                         trial_cond * confidence_rating +
                         (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),
                       data = merged_ratings,
                       prior = prior,
-                      cores = 8, iter = 1000, silent = TRUE, seed = 6523)
+                      cores = 8, iter = 2000, silent = TRUE, seed = 6523)
 ```
 
 #### plots {.tabset}
 ##### between-person {.tabset}
 ```{r, fig.width=7, fig.height=5.5}
 points_between = disaggregated_mindful %>%
-  select(pID, resp, trial_cond, dot_between_std_noc) %>%
-  group_by(pID, trial_cond, dot_between_std_noc) %>%
-  summarize(resp = mean(resp, na.rm = TRUE)) %>%
-  mutate(group = ifelse(trial_cond == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")),
+  select(pID, resp_std, trial_cond, dot_between_std) %>%
+  group_by(pID, trial_cond, dot_between_std) %>%
+  summarize(resp_std = mean(resp_std, na.rm = TRUE)) %>%
+  mutate(group = ifelse(trial_cond == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")),
          type = "between-person") %>%
-  rename("x" = dot_between_std_noc,
-         "predicted" = resp)
+  rename("x" = dot_between_std) %>%
+  ungroup() %>%
+  select(pID, x, group)
 
 vals = modelr::seq_range(points_between$x, n = 25)
 
-predicted = ggeffects::ggpredict(mod_ph_h2, c("dot_between_std_noc [vals]", "trial_cond"),
-                                 ci.lvl = 0.9) %>%
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("pID", "trial_cond"), type = "random") %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing"))) %>%
+  rename("pID" = x) %>%
+  left_join(., points_between)
+
+predicted = ggeffects::ggpredict(mod_h2_int, c("dot_between_std [vals]", "trial_cond"), 
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
   mutate(type = "between-person") %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")))
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
 
-predicted %>%
+(between = predicted %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
-  geom_point(data = points_between, alpha = .4, size = 2) +
-  geom_line(data = points_between, aes(group = pID), alpha = .4, size = 1.5, color = "grey") +
+  geom_point(data = predicted_sub, alpha = .4, size = 2) +
+  geom_line(data = predicted_sub, aes(group = pID), alpha = .4, size = 1.25, color = "grey") +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
   geom_line(size = 2) +
   scale_fill_manual(name = "trial type", values = palette) +
   scale_color_manual(name = "trial type", values = palette) +
-  labs(x = expression("\nreactivity " * symbol('\254') * " signature expression " * symbol('\256') * " mindful attention"),
-       y = "craving rating\n") +
+  scale_y_continuous(breaks = c(1,2,3)) +
+  labs(x = "between-person signature expression (SD)",
+       y = "craving rating (SD)\n",
+       title = "between-person") +
   plot_aes +
-  theme(legend.position = "top")
+  theme(legend.position = "top"))
 ```
 
 ##### within-person only
 ```{r, fig.width=7, fig.height=5.5}
-points_within = disaggregated_mindful %>%
-  select(pID, resp, trial_cond, dot_within_std) %>%
-  mutate(group = ifelse(trial_cond == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")),
-         type = "within-person") %>%
-  rename("x" = dot_within_std,
-         "predicted" = resp)
+vals = modelr::seq_range(disaggregated_mindful$dot_within_std, n = 25)
 
-vals = modelr::seq_range(points_within$x, n = 25)
-
-predicted = ggeffects::ggpredict(mod_ph_h2, c("dot_within_std [vals]", "trial_cond"),
-                                 ci.lvl = 0.9) %>%
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("dot_within_std [vals]", "trial_cond", "pID"), type = "random") %>%
   data.frame() %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")))
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
 
-predicted %>%
+predicted = ggeffects::ggpredict(mod_h2_int, c("dot_within_std [vals]", "trial_cond"),
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
+
+(within = predicted %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
-  stat_smooth(data = points_within, aes(group = interaction(pID, group)), geom = "line", method = "lm", alpha = 0.15, se = FALSE, size = 1.25, fullrange = TRUE) + 
+  stat_smooth(data = predicted_sub, aes(group = interaction(facet, group)), geom = "line", method = "lm", alpha = 0.15, se = FALSE, size = 1.25, fullrange = TRUE) + 
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .3, color = NA) + 
   geom_line(size = 2) +
   scale_fill_manual(name = "trial type", values = palette) +
   scale_color_manual(name = "trial type", values = palette) +
   labs(x = "within-person signature expression (SD)",
-       y = "craving rating\n",
+       y = "craving rating (SD)\n",
        title = "within-person") +
   plot_aes +
-  theme(legend.position = "top")
+  theme(legend.position = "top"))
 ```
 
 #### table
@@ -580,28 +826,28 @@ make_table(mod_ph_h2)
 #### simple slopes {.tabset}
 ##### signature expression
 ```{r}
-emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_between_std_noc", level = .9) %>%
+emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_between_std", level = .95) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std_noc.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 
-emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_within_std", level = .9) %>%
+emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_within_std", level = .95) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 ```
 
 ##### confidence ratings
 ```{r}
-emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="confidence_rating", level = .9) %>%
+emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="confidence_rating", level = .95) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", confidence_rating.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", confidence_rating.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 ```
 
@@ -615,13 +861,13 @@ Compare preregistered model with the modeling controlling for confidence ratings
 
 ```{r}
 posterior = posterior_samples(mod_h2_int) %>%
-  transmute(`mindful attention`= b_dot_between_std_noc + `b_trial_condregulation:dot_between_std_noc`,
-            reactivity = b_dot_between_std_noc) %>%
+  transmute(`mindful distancing`= b_dot_between_std + `b_trial_condregulation:dot_between_std`,
+            reactivity = b_dot_between_std) %>%
   gather(`trial type`, value) %>%
   mutate(model = "original model") %>%
   bind_rows(posterior_samples(mod_ph_h2) %>%
-              transmute(`mindful attention`= b_dot_between_std_noc + `b_trial_condregulation:dot_between_std_noc`,
-                        reactivity = b_dot_between_std_noc) %>%
+              transmute(`mindful distancing`= b_dot_between_std + `b_trial_condregulation:dot_between_std`,
+                        reactivity = b_dot_between_std) %>%
               gather(`trial type`, value) %>%
               mutate(model = "controlling for confidence")) %>% 
   mutate(model = factor(model, levels = c("original model", "controlling for confidence")))
@@ -636,7 +882,7 @@ posterior %>%
   plot_aes
 ```
 
-## Mindful Attention and Awareness (MAAS) analyses {.tabset}
+## Mindful distancing and Awareness (MAAS) analyses {.tabset}
 ```{r}
 merged_ratings = disaggregated_mindful %>%
   left_join(., maas)
@@ -657,11 +903,11 @@ cor.test(corr_data$MAAS_mean, corr_data$dot_between)
 > We examined the degree to which MAAS scores were associated with neural signature expression
 
 #### run model
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
 mod_ph_expression = brms::brm(dot ~ MAAS_mean * trial_cond + (1 + trial_cond | pID),
                            data = merged_ratings,
                            prior = prior,
-                           cores = 8, iter = 1000, silent = TRUE, seed = 6523)
+                           cores = 8, iter = 2000, silent = TRUE, seed = 6523)
 ```
 
 #### plot
@@ -669,8 +915,8 @@ mod_ph_expression = brms::brm(dot ~ MAAS_mean * trial_cond + (1 + trial_cond | p
 ggeffects::ggpredict(mod_ph_expression, terms = c("MAAS_mean", "trial_cond"),
                      ci.lvl = 0.9) %>%
   data.frame() %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention"))) %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing"))) %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
   geom_line(size = 2) +
@@ -691,9 +937,9 @@ make_table(mod_ph_expression)
 ```{r}
 emmeans::emtrends(mod_ph_expression, ~ trial_cond, var="MAAS_mean", level = .9) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", MAAS_mean.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", MAAS_mean.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 ```
 
@@ -706,82 +952,89 @@ summary(mod_ph_expression, prob = .9)
 > We examined the degree to which controlling for MAAS scores affected the results for H2
 
 #### run model {.tabset}
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
-mod_ph_h2 = brms::brm(resp ~ 1 + trial_cond * dot_between_std_noc +
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
+mod_ph_h2 = brms::brm(resp_std ~ 1 + trial_cond * dot_between_std +
                         trial_cond * dot_within_std + 
                         trial_cond * MAAS_mean +
                         (1 + trial_cond * dot_within_std | pID) + (1 | stimulus),
                       data = merged_ratings,
                       prior = prior,
-                      cores = 8, iter = 1000, silent = TRUE, seed = 6523)
+                      cores = 8, iter = 2000, silent = TRUE, seed = 6523)
 ```
 
 #### plots {.tabset}
 ##### between-person {.tabset}
 ```{r, fig.width=7, fig.height=5.5}
 points_between = disaggregated_mindful %>%
-  select(pID, resp, trial_cond, dot_between_std_noc) %>%
-  group_by(pID, trial_cond, dot_between_std_noc) %>%
-  summarize(resp = mean(resp, na.rm = TRUE)) %>%
-  mutate(group = ifelse(trial_cond == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")),
+  select(pID, resp_std, trial_cond, dot_between_std) %>%
+  group_by(pID, trial_cond, dot_between_std) %>%
+  summarize(resp_std = mean(resp_std, na.rm = TRUE)) %>%
+  mutate(group = ifelse(trial_cond == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")),
          type = "between-person") %>%
-  rename("x" = dot_between_std_noc,
-         "predicted" = resp)
+  rename("x" = dot_between_std) %>%
+  ungroup() %>%
+  select(pID, x, group)
 
 vals = modelr::seq_range(points_between$x, n = 25)
 
-predicted = ggeffects::ggpredict(mod_ph_h2, c("dot_between_std_noc [vals]", "trial_cond"),
-                                 ci.lvl = 0.9) %>%
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("pID", "trial_cond"), type = "random") %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing"))) %>%
+  rename("pID" = x) %>%
+  left_join(., points_between)
+
+predicted = ggeffects::ggpredict(mod_h2_int, c("dot_between_std [vals]", "trial_cond"), 
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
   mutate(type = "between-person") %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")))
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
 
-predicted %>%
+(between = predicted %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
-  geom_point(data = points_between, alpha = .4, size = 2) +
-  geom_line(data = points_between, aes(group = pID), alpha = .4, size = 1.5, color = "grey") +
+  geom_point(data = predicted_sub, alpha = .4, size = 2) +
+  geom_line(data = predicted_sub, aes(group = pID), alpha = .4, size = 1.25, color = "grey") +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .2, color = NA) +
   geom_line(size = 2) +
   scale_fill_manual(name = "trial type", values = palette) +
   scale_color_manual(name = "trial type", values = palette) +
-  labs(x = expression("\nreactivity " * symbol('\254') * " signature expression " * symbol('\256') * " mindful attention"),
-       y = "craving rating\n") +
+  scale_y_continuous(breaks = c(1,2,3)) +
+  labs(x = "between-person signature expression (SD)",
+       y = "craving rating (SD)\n",
+       title = "between-person") +
   plot_aes +
-  theme(legend.position = "top")
+  theme(legend.position = "top"))
 ```
 
 ##### within-person only
 ```{r, fig.width=7, fig.height=5.5}
-points_within = disaggregated_mindful %>%
-  select(pID, resp, trial_cond, dot_within_std) %>%
-  mutate(group = ifelse(trial_cond == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")),
-         type = "within-person") %>%
-  rename("x" = dot_within_std,
-         "predicted" = resp)
+vals = modelr::seq_range(disaggregated_mindful$dot_within_std, n = 25)
 
-vals = modelr::seq_range(points_within$x, n = 25)
-
-predicted = ggeffects::ggpredict(mod_ph_h2, c("dot_within_std [vals]", "trial_cond"),
-                                 ci.lvl = 0.9) %>%
+predicted_sub = ggeffects::ggpredict(mod_h2_int, terms = c("dot_within_std [vals]", "trial_cond", "pID"), type = "random") %>%
   data.frame() %>%
-  mutate(group = ifelse(group == "regulation", "mindful attention", "reactivity"),
-         group = factor(group, levels = c("reactivity", "mindful attention")))
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
 
-predicted %>%
+predicted = ggeffects::ggpredict(mod_h2_int, c("dot_within_std [vals]", "trial_cond"),
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
+  mutate(group = ifelse(group == "regulation", "mindful distancing", "reactivity"),
+         group = factor(group, levels = c("reactivity", "mindful distancing")))
+
+(within = predicted %>%
   ggplot(aes(x, predicted, color = group, fill = group)) +
-  stat_smooth(data = points_within, aes(group = interaction(pID, group)), geom = "line", method = "lm", alpha = 0.15, se = FALSE, size = 1.25, fullrange = TRUE) + 
+  stat_smooth(data = predicted_sub, aes(group = interaction(facet, group)), geom = "line", method = "lm", alpha = 0.15, se = FALSE, size = 1.25, fullrange = TRUE) + 
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .3, color = NA) + 
   geom_line(size = 2) +
   scale_fill_manual(name = "trial type", values = palette) +
   scale_color_manual(name = "trial type", values = palette) +
   labs(x = "within-person signature expression (SD)",
-       y = "craving rating\n",
+       y = "craving rating (SD)\n",
        title = "within-person") +
   plot_aes +
-  theme(legend.position = "top")
+  theme(legend.position = "top"))
 ```
 
 #### table
@@ -792,18 +1045,18 @@ make_table(mod_ph_h2)
 #### simple slopes {.tabset}
 ##### signature expression
 ```{r}
-emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_between_std_noc", level = .9) %>%
+emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_between_std", level = .9) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std_noc.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_between_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 
 emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_within_std", level = .9) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", dot_within_std.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 ```
 
@@ -811,9 +1064,9 @@ emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="dot_within_std", level = .9) %>%
 ```{r}
 emmeans::emtrends(mod_ph_h2, ~ trial_cond, var="MAAS_mean", level = .9) %>%
     data.frame() %>%
-    mutate(`b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", MAAS_mean.trend, lower.HPD, upper.HPD),
-           trial_cond = recode(trial_cond, "regulation" = "mindful attention")) %>%
-  select(trial_cond, `b [90% CI]`) %>%
+    mutate(`b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", MAAS_mean.trend, lower.HPD, upper.HPD),
+           trial_cond = recode(trial_cond, "regulation" = "mindful distancing")) %>%
+  select(trial_cond, `b [95% CI]`) %>%
       knitr::kable()
 ```
 
@@ -827,13 +1080,13 @@ Compare preregistered model with the modeling controlling for MAAS scores
 
 ```{r}
 posterior = posterior_samples(mod_h2_int) %>%
-  transmute(`mindful attention`= b_dot_between_std_noc + `b_trial_condregulation:dot_between_std_noc`,
-            reactivity = b_dot_between_std_noc) %>%
+  transmute(`mindful distancing`= b_dot_between_std + `b_trial_condregulation:dot_between_std`,
+            reactivity = b_dot_between_std) %>%
   gather(`trial type`, value) %>%
   mutate(model = "original model") %>%
   bind_rows(posterior_samples(mod_ph_h2) %>%
-              transmute(`mindful attention`= b_dot_between_std_noc + `b_trial_condregulation:dot_between_std_noc`,
-                        reactivity = b_dot_between_std_noc) %>%
+              transmute(`mindful distancing`= b_dot_between_std + `b_trial_condregulation:dot_between_std`,
+                        reactivity = b_dot_between_std) %>%
               gather(`trial type`, value) %>%
               mutate(model = "controlling for MAAS")) %>% 
   mutate(model = factor(model, levels = c("original model", "controlling for MAAS")))

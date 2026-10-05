@@ -23,7 +23,7 @@ options(scipen = 999)
 
 This code cleans the data for the following manuscript:
 
-[Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
+[Mindful distancing to alcohol can reduce cravings in the moment and consumption in daily life]()
 
 # load packages
 ```{r}
@@ -33,7 +33,7 @@ pacman::p_load(tidyverse, lubridate, install = TRUE)
 
 # load and tidy data {.tabset}
 * remove trials missing stimulus information
-  * the following participants had technical errors during all mindful attention trials: sub-MURIP012, sub-MURIP063, sub-MURIP078
+  * the following participants had technical errors during all mindful distancing trials: sub-MURIP012, sub-MURIP063, sub-MURIP078
 * remove trials in which the mean signal intensity of the brain map is +/- 3 SDs from the mean
 
 ## task
@@ -54,14 +54,15 @@ task_conditions = task_data %>%
   select(pID, trial_type) %>%
   unique() %>%
   filter(grepl("friend|mindful", trial_type) | pID %in% c("sub-MURIP012", "sub-MURIP063", "sub-MURIP078")) %>%
-  mutate(condition = ifelse(grepl("friend", trial_type), "perspective-taking", "mindful attention")) %>%
+  mutate(condition = ifelse(grepl("friend", trial_type), "perspective-taking", "mindful distancing")) %>%
   select(-trial_type) %>%
   unique()
 
 task_data_all = task_data %>%
   left_join(., task_conditions) %>%
   mutate(condition = ifelse(is.na(condition), "control", condition),
-         trial_cond = factor(trial_cond, c("non-alcohol reactivity", "reactivity", "regulation", "up-regulation")))
+         trial_cond = factor(trial_cond, c("non-alcohol reactivity", "reactivity", "regulation", "up-regulation")),
+         resp_std = scale(resp, center = TRUE, scale = TRUE))
 ```
 
 ## dots
@@ -165,7 +166,7 @@ ema = ema_all %>%
 * create disaggregated_mindful dataset
   * `dot_within_std` = within-person centered level-1 signature expression variable; standardized across participants
   * `dot_between_std` = grand-mean centered level-2 signature expression variable; standardized across participants
-* due to a technical errror, the following participants are missing behavioral data from mindful attention trials: sub-MURIP063, sub-MURIP078, sub-MURIP012
+* due to a technical errror, the following participants are missing behavioral data from mindful distancing trials: sub-MURIP063, sub-MURIP078, sub-MURIP012
 
 ```{r}
 merged = task_data_all %>%
@@ -178,16 +179,14 @@ between = merged %>%
   select(pID, dot, trial_cond, condition) %>%
   group_by(pID, trial_cond, condition) %>%
   summarize(dot_between = mean(dot, na.rm = TRUE)) %>%
-  group_by(condition) %>%
-  mutate(sd_dot = sd(dot_between, na.rm = TRUE),
-         dot_between_std_noc = dot_between / sd_dot) %>%
-  select(-sd_dot)
+  ungroup() %>%
+  mutate(dot_between_std = scale(dot_between))
 
 within = merged %>%
   select(pID, block_num, trial_num, dot, condition, trial_cond) %>%
-  group_by(pID, condition) %>%
+  group_by(pID) %>%
   mutate(dot_within_c = scale(dot, scale = FALSE, center = TRUE)) %>%
-  group_by(condition) %>%
+  ungroup() %>%
   mutate(sd_dot = sd(dot_within_c, na.rm = TRUE),
          dot_within_std = dot_within_c / sd_dot) %>%
   select(-sd_dot)

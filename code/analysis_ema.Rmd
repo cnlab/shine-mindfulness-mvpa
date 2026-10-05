@@ -24,7 +24,7 @@ options(scipen = 999)
 
 This code reproduces the EMA intervention analyses reported in the following manuscript:
 
-[Mindful attention to alcohol can reduce cravings in the moment and consumption in daily life]()
+[Using neural signatures to predict health behavior change: A mindful distancing intervention to reduce alcohol consumption as a proof of concept]()
 
 # load packages
 ```{r}
@@ -52,13 +52,12 @@ plot_aes = theme_minimal() +
 ```{r}
 merged = read.csv("../data/task_neuro_data.csv", stringsAsFactors = FALSE)
 ema = read.csv("../data/ema.csv")
-maas = read.csv("../data/MAAS.csv", stringsAsFactors = FALSE)
 ```
 
 ## merge and prep for modeling
 ```{r}
 between = merged %>%
-  filter(condition == "mindful attention") %>%
+  filter(condition == "mindful distancing") %>%
   select(pID, dot, trial_cond, condition) %>%
   group_by(pID, trial_cond, condition) %>%
   summarize(dot_between = mean(dot, na.rm = TRUE)) %>%
@@ -71,11 +70,34 @@ between = merged %>%
   spread(trial_cond, dot_between_std)
 
 ema_within = ema %>%
-  left_join(., between) %>%
-  left_join(., maas)
+  left_join(., between)
 ```
 
 # descriptives {.tabset}
+## completion rates {.tabset}
+### overall
+```{r}
+responses = ema %>%
+  filter(!is.na(HadAlcohol)) 
+
+nrow(responses)
+round((nrow(responses) / nrow(ema)) * 100, 1)
+```
+
+### by participant
+```{r}
+ema %>%
+  group_by(pID) %>%
+  summarize(n_response = sum(ifelse(is.na(HadAlcohol), 0, 1)),
+            n_total = n()) %>%
+  mutate(percent = round((n_response / n_total) * 100, 1)) %>%
+  summarize(M = mean(percent),
+            SD = sd(percent),
+            min = min(percent),
+            max = max(percent)) %>%
+  knitr::kable(digits = 1, format = "pandoc")
+```
+
 ## craving
 ```{r}
 ema_within %>%
@@ -173,7 +195,7 @@ ema_within %>%
 
 # effectiveness and individual differences: experience sampling intervention analyses (H3-4) {.tabset}
 ## run model
-```{r, cache = TRUE, echo = TRUE, results = "hide"}
+```{r, cache = FALSE, echo = TRUE, results = "hide"}
 prior = c(prior(normal(0, 1), class=b))
 
 fm = bf(mindful_response ~ active_week * regulation_expression + (0 + active_week |i| pID)) +
@@ -196,7 +218,7 @@ fit_brm_sequential = brm(
 ## table
 ```{r}
 fit_brm_sequential %>%
-  broom.mixed::tidy(conf.int = TRUE, conf.level = 0.9) %>%
+  broom.mixed::tidy(conf.int = TRUE, conf.level = 0.95) %>%
   filter(effect == "fixed") %>%
   mutate(term = gsub("\\(Intercept\\)", "intercept", term),
          term = gsub("regulation_expression", "signature expression", term),
@@ -208,7 +230,7 @@ fit_brm_sequential %>%
          response = gsub("cravingprevious", "craving previous", response),
          response = gsub("drinksnumber", "number of drinks", response),
          term = gsub(":", " x ", term),
-         `b [90% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high),
+         `b [95% CI]` = sprintf("%.2f [%.2f, %.2f]", estimate, conf.low, conf.high),
          path = ifelse(grepl("intervention", term) & response == "mindful response", "a1",
                 ifelse(grepl("mindful", term) & response == "craving previous", "b1",
                 ifelse(grepl("craving", term) & response == "number of drinks", "b2",
@@ -216,8 +238,9 @@ fit_brm_sequential %>%
                 ifelse(grepl("mindful", term) & response == "number of drinks", "b3",
                 ifelse(grepl("intervention", term) & response == "number of drinks", "c'", ""))))))) %>%
   rename("outcome" = response) %>%
-  select(outcome, path, term, `b [90% CI]`) %>%
-  arrange(outcome) %>%
+  select(outcome, path, term, `b [95% CI]`) %>%
+  mutate(outcome = factor(outcome, levels = c("mindful response", "craving previous", "number of drinks"))) %>%
+  arrange(outcome, path) %>%
   knitr::kable(digits = 2, format = "pandoc")
 ```
 
@@ -233,7 +256,7 @@ hypothesis(
   = 0',
   class = NULL,
   seed  =  6523,
-  alpha = .1
+  alpha = .05
 )
 ```
 
@@ -248,7 +271,7 @@ hypothesis(
   = 0',
   class = NULL,
   seed  =  6523,
-  alpha = .1
+  alpha = .05
 )
 ```
 
@@ -275,43 +298,40 @@ hypothesis(
   = 0',
   class = NULL,
   seed  =  6523,
-  alpha = .1
+  alpha = .05
 )
 ```
 
 ## summary
 ```{r}
-summary(fit_brm_sequential, prob = .9)
+summary(fit_brm_sequential, prob = .95)
 ```
 
 ## plots {.tabset}
 ### a1 path: mindful responses ~ intervention week
 ```{r}
 predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("active_week", "regulation_expression [0, 1]"),
-                                 ci.lvl = 0.9) %>%
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
   mutate(x = recode(x, "on" = "active", "off" = "control"),
          group = recode(group, "0" = "mean", "1" = "+1 SD"),
          x = factor(x, levels = c("control", "active")))
 
-slopes_within = ema_within %>%
-  filter(!is.na(active_week)) %>%
-  select(pID, active_week, mindful_response) %>%
-  rename("x" = active_week,
-         "predicted" = mindful_response) %>%
+predicted_sub = ggeffects::ggpredict(fit_brm_sequential, terms = c("active_week", "pID"), type = "random",
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
   mutate(x = recode(x, "on" = "active", "off" = "control"),
          x = factor(x, levels = c("control", "active"))) %>%
-  group_by(pID, x) %>%
-  summarize(predicted = mean(predicted, na.rm = TRUE))
+  filter(response.level == "mindfulresponse")
 
 (plot_a = predicted %>%
   filter(response.level == "mindfulresponse") %>%
   ggplot(aes(x, predicted)) +
-  geom_line(data = slopes_within, aes(x, predicted, group = pID), alpha = .1, size = 1) +
-  geom_line(aes(group = group, color = group), size = 1.5, , position = position_dodge(.1)) +
-  geom_pointrange(aes(ymin = conf.low, ymax = conf.high, color = group), size = 1.5, linewidth = 2, position = position_dodge(.1)) +
+  stat_smooth(data = predicted_sub, aes(x, predicted, group = group), method = "lm", geom ="line", alpha = .2, size = 1.5, se = FALSE, fullrange = TRUE) +
+  geom_line(aes(group = group, color = group), size = 1.5, , position = position_dodge(.02)) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high, color = group), size = 1.5, linewidth = 2, position = position_dodge(.02)) +
   scale_x_discrete(expand = c(.1, .1)) +
-  scale_y_continuous(breaks = c(-1, 0, 1)) +
+  #scale_y_continuous(breaks = c(-1, 0, 1)) +
   scale_color_manual(values = palette, name = "signature expression") +
   labs(x = "\nintervention week", y = "within-person mindful response (SD)\n", title = "\na1 path") +
   plot_aes)
@@ -321,28 +341,23 @@ slopes_within = ema_within %>%
 ```{r}
 vals = modelr::seq_range(ema_within$mindful_response, n = 25)
 
-slopes_within = ema_within %>%
-  select(pID, mindful_response, craving_previous) %>%
-  rename("x" = craving_previous,
-         "predicted" = mindful_response)
-
 predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("mindful_response [vals]", "regulation_expression [0, 1]"),
-                                 ci.lvl = 0.9) %>%
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
   mutate(group = recode(group, "0" = "mean", "1" = "+1 SD"))
 
-slopes_within = ema_within %>%
-  select(pID, mindful_response, craving_previous) %>%
-  rename("x" = mindful_response,
-         "predicted" = craving_previous)
+predicted_sub = ggeffects::ggpredict(fit_brm_sequential, terms = c("mindful_response [vals]", "pID"), type = "random",
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
+  filter(response.level == "cravingprevious")
 
 (plot_b1 = predicted %>%
   filter(response.level == "cravingprevious") %>%
   ggplot(aes(x, predicted)) +
-  stat_smooth(data = slopes_within, aes(x, predicted, group = pID), method = "lm", geom ="line", alpha = .1, size = 1, se = FALSE, fullrange = TRUE) +
+  stat_smooth(data = predicted_sub, aes(x, predicted, group = group), method = "lm", geom ="line", alpha = .2, size = 1.5, se = FALSE, fullrange = TRUE) +
+  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .3) +
   geom_line(aes(group = group, color = group), size = 2) +
-  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .5) +
-  scale_y_continuous(breaks = c(-3, 0, 3, 6)) +
+  #scale_y_continuous(breaks = c(-3, 0, 3, 6)) +
   scale_color_manual(values = palette, name = "signature expression") +
   scale_fill_manual(values = palette, name = "signature expression") +
   labs(x = "\nwithin-person mindful response (SD)", y = "within-person craving (SD)\n", title = "\nb1 path") +
@@ -353,22 +368,22 @@ slopes_within = ema_within %>%
 ```{r}
 vals = modelr::seq_range(ema_within$craving_previous, n = 25)
 
-slopes_within = ema_within %>%
-  select(pID, drinks_number, craving_previous) %>%
-  rename("x" = craving_previous,
-         "predicted" = drinks_number)
-
 predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("craving_previous [vals]", "regulation_expression [0, 1]"),
-                                 ci.lvl = 0.9) %>%
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
   mutate(group = recode(group, "0" = "mean", "1" = "+1 SD"))
+
+predicted_sub = ggeffects::ggpredict(fit_brm_sequential, terms = c("craving_previous [vals]", "pID"), type = "random",
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
+  filter(response.level == "drinksnumber")
 
 (plot_b2 = predicted %>%
   filter(response.level == "drinksnumber") %>%
   ggplot(aes(x, predicted)) +
-  stat_smooth(data = slopes_within, aes(x, predicted, group = pID), method = "lm", geom ="line", alpha = .1, size = 1, se = FALSE, fullrange = TRUE) +
+  stat_smooth(data = predicted_sub, aes(x, predicted, group = group), method = "lm", geom ="line", alpha = .2, size = 1.5, se = FALSE, fullrange = TRUE) +
+  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .3) +
   geom_line(aes(group = group, color = group), size = 2) +
-  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .5) +
   scale_color_manual(values = palette, name = "signature expression") +
   scale_fill_manual(values = palette, name = "signature expression") +
   labs(x = "\nwithin-person craving (SD)", y = "within-person number of drinks\n", title = "\nb2 path") +
@@ -379,22 +394,22 @@ predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("craving_previous
 ```{r}
 vals = modelr::seq_range(ema_within$mindful_response, n = 25)
 
-slopes_within = ema_within %>%
-  select(pID, drinks_number, mindful_response) %>%
-  rename("x" = mindful_response,
-         "predicted" = drinks_number)
-
 predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("mindful_response [vals]", "regulation_expression [0, 1]"),
-                                 ci.lvl = 0.9) %>%
+                                 ci.lvl = 0.95) %>%
   data.frame() %>%
   mutate(group = recode(group, "0" = "mean", "1" = "+1 SD"))
+
+predicted_sub = ggeffects::ggpredict(fit_brm_sequential, terms = c("mindful_response [vals]", "pID"), type = "random",
+                                 ci.lvl = 0.95) %>%
+  data.frame() %>%
+  filter(response.level == "drinksnumber")
 
 (plot_b3 = predicted %>%
   filter(response.level == "drinksnumber") %>%
   ggplot(aes(x, predicted)) +
-  stat_smooth(data = slopes_within, aes(x, predicted, group = pID), method = "lm", geom ="line", alpha = .1, size = 1, se = FALSE, fullrange = TRUE) +
+  stat_smooth(data = predicted_sub, aes(x, predicted, group = group), method = "lm", geom ="line", alpha = .2, size = 1.5, se = FALSE, fullrange = TRUE) +
+  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .3) +
   geom_line(aes(group = group, color = group), size = 2) +
-  geom_ribbon(aes(fill = group, ymin = conf.low, ymax = conf.high), size = 2, alpha = .5) +
   scale_color_manual(values = palette, name = "signature expression") +
   scale_fill_manual(values = palette, name = "signature expression") +
   labs(x = "\nwithin-person mindful response (SD)", y = "within-person number of drinks\n", title = "\nb3 path") +
@@ -403,5 +418,7 @@ predicted = ggeffects::ggpredict(fit_brm_sequential, terms = c("mindful_response
 
 ### combined
 ```{r, fig.width=11.5, fig.height=9}
-ggpubr::ggarrange(plot_a, plot_b1, plot_b2, plot_b3, nrow = 2, ncol = 2, common.legend = TRUE)
+legend_grob = ggpubr::get_legend(plot_a)
+ggpubr::ggarrange(plot_a, plot_b1, plot_b2, plot_b3, nrow = 2, ncol = 2, common.legend = TRUE, legend.grob = legend_grob) 
 ```
+
